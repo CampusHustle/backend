@@ -7,10 +7,27 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MONGODB_URI: mongodb://localhost:27017/campushustle_test
+      NODE_ENV: test
+      JWT_SECRET: test-secret-for-ci-only
 
     steps:
       - name: Checkout repository
@@ -29,4 +46,9 @@ jobs:
         run: npm run lint
 
       - name: Test
-        run: npm test
+        run: npm test -- --run
+
+      # No "Build" step by default — most Express APIs run directly from source.
+      # Remove this comment and add one back if you're compiling TypeScript, e.g.:
+      # - name: Build
+      #   run: npm run build
