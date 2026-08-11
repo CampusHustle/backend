@@ -56,3 +56,18 @@ export function requireRole(...allowedRoles) {
     next();
   };
 }
+
+/**
+ * Middleware to restrict action to accounts with verified university email addresses.
+ */
+export function requireVerifiedEmail(req, res, next) {
+  if (!req.user) {
+    return next(new AppError('Authentication required.', 401, 'UNAUTHORIZED'));
+  }
+
+  if (!req.user.isEmailVerified) {
+    return next(new AppError('University email verification required for this action.', 403, 'EMAIL_NOT_VERIFIED'));
+  }
+
+  next();
+}

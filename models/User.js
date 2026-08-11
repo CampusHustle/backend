@@ -65,6 +65,15 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    emailVerificationTokenHash: {
+      type: String,
+      default: null,
+      select: false
+    },
+    emailVerificationExpires: {
+      type: Date,
+      default: null
+    },
     isBlocked: {
       type: Boolean,
       default: false
@@ -80,11 +89,12 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Strip passwordHash and refreshTokenHash when serializing to JSON
+// Strip security hashes when serializing to JSON
 userSchema.set('toJSON', {
   transform: (doc, ret) => {
     delete ret.passwordHash;
     delete ret.refreshTokenHash;
+    delete ret.emailVerificationTokenHash;
     delete ret.__v;
     return ret;
   }
