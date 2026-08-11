@@ -9,7 +9,6 @@ export async function register(req, res, next) {
   try {
     const { email, password, name, university, department, year, role } = req.body;
 
-    // Fail fast input validation & strict type checking to prevent NoSQL injection objects
     if (
       typeof email !== 'string' ||
       typeof password !== 'string' ||
@@ -39,7 +38,6 @@ export async function login(req, res, next) {
   try {
     const { email, password } = req.body;
 
-    // Fail fast input validation & strict type checking to prevent NoSQL query operator injection
     if (typeof email !== 'string' || typeof password !== 'string') {
       throw new AppError('Email and password must be valid strings.', 400, 'VALIDATION_ERROR');
     }
@@ -53,17 +51,17 @@ export async function login(req, res, next) {
 }
 
 /**
- * Handles university email verification.
+ * Handles university email verification via signed verification token.
  */
 export async function verifyEmail(req, res, next) {
   try {
-    const { email } = req.body;
+    const token = req.body?.token || req.query?.token;
 
-    if (typeof email !== 'string') {
-      throw new AppError('Email must be a valid string.', 400, 'VALIDATION_ERROR');
+    if (typeof token !== 'string' || !token) {
+      throw new AppError('Verification token string is required.', 400, 'VALIDATION_ERROR');
     }
 
-    const result = await authService.verifyUserEmail(email);
+    const result = await authService.verifyUserEmail(token);
 
     res.status(200).json(result);
   } catch (error) {
@@ -72,19 +70,50 @@ export async function verifyEmail(req, res, next) {
 }
 
 /**
- * Refreshes an access token using a refresh token.
+ * Handles resending verification token to unverified university accounts.
+ */
+export async function resendVerification(req, res, next) {
+  try {
+    const { email } = req.body;
+
+    if (typeof email !== 'string' || !email) {
+      throw new AppError('Valid university email is required.', 400, 'VALIDATION_ERROR');
+    }
+
+    const result = await authService.resendVerificationEmail(email);
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Refreshes an access token and rotates the refresh token.
  */
 export async function refresh(req, res, next) {
   try {
     const { refreshToken } = req.body;
 
-    if (typeof refreshToken !== 'string') {
-      throw new AppError('refreshToken must be a valid string.', 400, 'VALIDATION_ERROR');
+    if (typeof refreshToken !== 'string' || !refreshToken) {
+      throw new AppError('refreshToken string is required.', 400, 'VALIDATION_ERROR');
     }
 
     const tokens = await authService.refreshAuthToken(refreshToken);
 
     res.status(200).json(tokens);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Logs out user and revokes active refresh token session.
+ */
+export async function logout(req, res, next) {
+  try {
+    const result = await authService.logoutUser(req.user._id);
+    res.status(200).json(result);
   } catch (error) {
     next(error);
   }
