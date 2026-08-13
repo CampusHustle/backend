@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { configDotenv } from "dotenv";
+import { config } from "./env.js";
 
 /** Connects to MongoDB Atlas using the configured database URL. */
 export async function connectDB() {
