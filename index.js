@@ -5,6 +5,7 @@ import { connectDB } from './config/db.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
+import noteRoutes from './routes/noteRoutes.js';
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.get('/api/health', (_req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/notes', noteRoutes);
 
 // Centralized error handling middleware
 app.use(errorHandler);
