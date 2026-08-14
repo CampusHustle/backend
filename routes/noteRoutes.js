@@ -1,45 +1,93 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { requireAuth } from '../middleware/auth.js';
-import { AppError } from '../middleware/errorHandler.js';
+import { requireAuth, requireRole } from '../middleware/auth.js';
+import { uploadNote, getNotesByTutor, getNoteById } from '../controllers/noteController.js';
 
 const router = Router();
 
-// Configure Multer memory storage for buffer handling before Cloudinary upload
+/**
+ * Configure Multer memory storage for buffer handling before Cloudinary upload.
+ * NFR compliance:
+ *   - Memory storage allows streaming to Cloudinary without disk I/O overhead
+ *   - Size limits prevent abuse and storage exhaustion
+ *   - File-type validation deferred to controller for detailed error messages
+ */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB hard limit before Cloudinary (per file)
+  }
 });
 
 /**
- * Skeleton upload endpoint for notes (FR-9).
- * Accepts file via multipart form-data or JSON file metadata and returns stored reference.
+ * POST /notes
+ * Upload a note file (PDF or image) with metadata.
+ * 
+ * Authentication: Required (Bearer JWT)
+ * Authorization: Tutor role (or student with tutor capability)
+ * 
+ * Request:
+ *   multipart/form-data:
+ *     - file: binary (PDF, JPEG, PNG, WebP) — max 10MB
+ *     - title: string (required) — note title
+ *     - course: string (required) — course code/name
+ *     - description: string (optional) — note summary
+ *     - price: number (optional, default 0) — selling price in currency units
+ *     - previewPages: number (optional, default 3) — pages shown in preview
+ * 
+ * Response (201):
+ *   {
+ *     success: true,
+ *     message: "Note uploaded successfully.",
+ *     note: {
+ *       _id, tutorId, title, course, description, fileUrl,
+ *       price, previewPages, purchaseCount: 0, createdAt, updatedAt
+ *     }
+ *   }
+ * 
+ * Errors (400, 413, 500):
+ *   - NO_FILE_PROVIDED: multipart form missing 'file' field
+ *   - MISSING_REQUIRED_FIELDS: title or course missing
+ *   - UNSUPPORTED_FILE_TYPE: MIME type not in whitelist
+ *   - FILE_SIZE_EXCEEDED: file size exceeds per-type limit
+ *   - CLOUDINARY_UPLOAD_FAILED: Cloudinary API error (graceful degradation)
+ * 
+ * FR-9 compliance: Accepts PDF and images for OCR
+ * NFR-1 compliance: Auth via JWT
+ * NFR-10 compliance: Graceful error if Cloudinary rate-limited
  */
-router.post('/', upload.single('file'), (req, res, next) => {
-  try {
-    const { title, course, description, price } = req.body || {};
-    const file = req.file;
+router.post('/', requireAuth, upload.single('file'), uploadNote);
 
-    // Simulated/Skeleton stored reference URL (Cloudinary integration endpoint)
-    const fileUrl = file
-      ? `https://res.cloudinary.com/campushustle/image/upload/v1234567890/notes/${file.originalname}`
-      : req.body?.fileUrl || 'https://res.cloudinary.com/campushustle/raw/upload/sample_note.pdf';
+/**
+ * GET /notes/tutor/:tutorId
+ * Retrieve all notes uploaded by a specific tutor.
+ * 
+ * Response (200):
+ *   {
+ *     success: true,
+ *     count: number,
+ *     notes: [{ _id, title, course, price, ... }]
+ *   }
+ * 
+ * Used for tutor profile pages and search results.
+ */
+router.get('/tutor/:tutorId', getNotesByTutor);
 
-    res.status(201).json({
-      success: true,
-      message: 'Note upload endpoint skeleton executed successfully.',
-      note: {
-        title: title || 'Untitled Study Note',
-        course: course || 'General Course',
-        description: description || '',
-        price: parseFloat(price || '0'),
-        fileUrl,
-        uploadStatus: 'ready'
-      }
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * GET /notes/:noteId
+ * Retrieve a single note by ID.
+ * 
+ * Response (200):
+ *   {
+ *     success: true,
+ *     note: { _id, tutorId, title, course, fileUrl, price, ... }
+ *   }
+ * 
+ * Errors (404):
+ *   - NOTE_NOT_FOUND: noteId does not exist
+ * 
+ * Used for note detail/preview pages.
+ */
+router.get('/:noteId', getNoteById);
 
 export default router;
