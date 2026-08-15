@@ -21,6 +21,10 @@ export const config = {
   emailVerificationExpiresIn:
     process.env.EMAIL_VERIFICATION_EXPIRES_IN || "24h",
   clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
+  // Cloudinary credentials (configured via env vars, never committed)
+  cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "demo_cloud",
+  cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "123456789",
+  cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "secret_key",
   // Ethiopian university email domain pattern (strictly ending in .edu.et)
   universityEmailRegex: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.edu\.et$/i,
 };

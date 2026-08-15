@@ -1,5 +1,5 @@
 import Booking from "../models/booking";
-import Availability from "../models/availability";
+import { Availability } from "../models/Availability.js";
 
 export const createBooking = async (req, res) => {
   try {

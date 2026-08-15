@@ -1,29 +1,49 @@
 import mongoose from "mongoose";
 
-const availablitySchema = new mongoose.Schema(
+const availabilitySchema = new mongoose.Schema(
   {
     tutorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
+
     dayOfWeek: {
-      type: Date,
+      type: String,
+      enum: [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+      ],
       required: true,
     },
-    // used date object instead of string for flexiblity
+
     startTime: {
-      type: Date,
+      type: String,
       required: true,
+      match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
     },
+
     endTime: {
-      type: Date,
+      type: String,
       required: true,
+      match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
     },
+
     isBooked: {
       type: Boolean,
-      required: true,
       default: false,
+    },
+
+    imgUrl: {
+      type: String,
+      required: true,
+      default: "https://placehold.co/600x400?text=Image+Not+Found",
     },
   },
   {
@@ -31,4 +51,10 @@ const availablitySchema = new mongoose.Schema(
   },
 );
 
-export default mongoose.model("Availability", availablitySchema);
+availabilitySchema.index({
+  tutorId: 1,
+  dayOfWeek: 1,
+  isBooked: 1,
+});
+
+export const Availability = mongoose.model("Availability", availabilitySchema);

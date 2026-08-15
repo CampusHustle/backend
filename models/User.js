@@ -47,6 +47,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: ''
     },
+    hourlyRate: {
+      type: Number,
+      default: 0,
+      min: [0, 'Hourly rate cannot be negative']
+    },
     skillsTeaching: {
       type: [String],
       default: []
@@ -88,6 +93,13 @@ const userSchema = new mongoose.Schema(
     timestamps: true
   }
 );
+
+// Compound and single field indexes for sub-millisecond search query performance (NFR-4)
+userSchema.index({ skillsTeaching: 1 });
+userSchema.index({ department: 1 });
+userSchema.index({ hourlyRate: 1 });
+userSchema.index({ 'rating.knowledge': -1 });
+userSchema.index({ role: 1, isBlocked: 1 });
 
 // Strip security hashes when serializing to JSON
 userSchema.set('toJSON', {

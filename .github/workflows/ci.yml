@@ -1,18 +1,26 @@
-name: Backend CI
+name: CampusHustle Backend CI/CD
 
 on:
   push:
     branches:
       - main
-      - feature
+      - develop
   pull_request:
+    types: [opened, synchronize, reopened]
     branches:
       - main
-      - feature
+      - develop
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  # =========================================================================
+  # 1. Continuous Integration (CI): Lint, Test & Health Verification
+  # =========================================================================
+  ci:
+    name: CI Checks (Lint, Test, Build)
     runs-on: ubuntu-latest
 
     services:
@@ -27,32 +35,74 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: mongodb://localhost:27017/campus_hustle_test
       NODE_ENV: test
       PORT: 5000
-      JWT_SECRET: test-secret-for-ci-only
-      JWT_REFRESH_SECRET: test-refresh-secret-for-ci-only
+      DATABASE_URL: mongodb://localhost:27017/campus_hustle_test
+      JWT_SECRET: ci_test_jwt_secret_key_non_production_only
+      JWT_REFRESH_SECRET: ci_test_jwt_refresh_secret_key_non_production_only
+      EMAIL_VERIFICATION_SECRET: ci_test_email_verification_secret_key
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      EMAIL_VERIFICATION_EXPIRES_IN: 24h
+      CLIENT_URL: http://localhost:5173
+      CLOUDINARY_CLOUD_NAME: test_cloud
+      CLOUDINARY_API_KEY: '123456789'
+      CLOUDINARY_API_SECRET: test_secret_key
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js Environment (v20)
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: npm ci
 
-      - name: Check JavaScript syntax
-        run: node -c index.js
+      - name: Run Linter / Syntax Checks
+        run: npm run lint
 
-      - name: Verify server health endpoint
+      - name: Run Automated Test Suite
+        run: npm test
+
+      - name: Verify Server Startup & Health Check Endpoint
         run: |
           node index.js &
           SERVER_PID=$!
-          sleep 3
-          curl -s http://localhost:5000/api/health | grep '"status":"ok"'
+          sleep 4
+          curl --fail --show-error -s http://localhost:5000/api/health | grep '"status":"ok"'
           kill $SERVER_PID
+
+  # =========================================================================
+  # 2. Continuous Deployment (CD): Production Deployment (Render)
+  # =========================================================================
+  cd:
+    name: CD Deployment (Production)
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Trigger Render Production Deployment
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$DEPLOY_HOOK_URL" ]; then
+            echo "Triggering deployment to Render..."
+            RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$DEPLOY_HOOK_URL")
+            HTTP_BODY=$(echo "$RESPONSE" | sed -e '$d')
+            HTTP_STATUS=$(echo "$RESPONSE" | tr -d '\n' | sed -e 's/.*HTTP_STATUS://')
+            
+            if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+              echo "Deployment triggered successfully (HTTP $HTTP_STATUS)."
+            else
+              echo "Deployment trigger failed with status $HTTP_STATUS: $HTTP_BODY"
+              exit 1
+            fi
+          else
+            echo "::warning ::RENDER_DEPLOY_HOOK_URL secret is not configured in GitHub repository secrets. Skipping remote webhook trigger."
+          fi
