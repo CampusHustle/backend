@@ -1,6 +1,10 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import Note from '../models/Note.js';
 import cloudinary from '../config/cloudinary.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { processOcrToPdf } from '../utils/ocrHelper.js';
 
 /**
  * Supported file types for note uploads.
@@ -27,22 +31,90 @@ const MAX_FILE_SIZE = {
   'image/webp': 5 * 1024 * 1024             // 5MB for WebP
 };
 
+export async function prepareUploadedNoteFile(file, ocrRunner = processOcrToPdf) {
+  const mimeType = file.mimetype;
+
+  if (!ALLOWED_MIME_TYPES[mimeType]) {
+    const supportedTypes = Object.keys(ALLOWED_MIME_TYPES).join(', ');
+    throw new AppError(
+      `Unsupported file type: ${mimeType}. Supported types: ${supportedTypes}`,
+      400,
+      'UNSUPPORTED_FILE_TYPE'
+    );
+  }
+
+  if (mimeType === 'application/pdf') {
+    return file;
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'campushustle-ocr-'));
+  const originalBaseName = path.basename(file.originalname || 'note', path.extname(file.originalname || 'note')) || 'note';
+  const inputPath = path.join(tempDir, `${originalBaseName}${path.extname(file.originalname || '.png') || '.png'}`);
+  const outputPath = path.join(tempDir, `${originalBaseName}.pdf`);
+
+  try {
+    await fs.writeFile(inputPath, file.buffer);
+    const ocrResult = await ocrRunner(inputPath, outputPath);
+    const extractedText = typeof ocrResult === 'object' && ocrResult && ocrResult.extractedText ? ocrResult.extractedText : '';
+    const confidence = typeof ocrResult === 'object' && ocrResult && Number.isFinite(Number(ocrResult.confidence)) ? Number(ocrResult.confidence) : 100;
+
+    if (!extractedText.trim()) {
+      throw new AppError(
+        'OCR produced no readable text. Please upload a clearer image or a PDF instead.',
+        400,
+        'OCR_NO_TEXT_FOUND'
+      );
+    }
+
+    if (confidence > 0 && confidence < 45) {
+      throw new AppError(
+        `OCR confidence too low (${confidence}%). Please upload a clearer image or a PDF instead.`,
+        400,
+        'OCR_LOW_CONFIDENCE'
+      );
+    }
+
+    const convertedBuffer = await fs.readFile(outputPath);
+
+    return {
+      ...file,
+      buffer: convertedBuffer,
+      mimetype: 'application/pdf',
+      originalname: `${originalBaseName}.pdf`,
+      size: convertedBuffer.length
+    };
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError(
+      'OCR conversion failed. Please upload a clearer image or a PDF instead.',
+      400,
+      'OCR_PROCESSING_FAILED'
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /**
  * Upload a note file to Cloudinary and save metadata to MongoDB.
- * Supports both PDF uploads and image uploads (for later OCR processing in Day 5).
+ * Supports both PDF uploads and image uploads, converting images to PDF with Tesseract OCR.
  *
  * Flow:
  *   1. Validate file presence
  *   2. Validate MIME type (FR-9 compliance, NFR security)
  *   3. Validate file size (NFR storage limits)
- *   4. Upload to Cloudinary with resource-type inference
- *   5. Save Note document to MongoDB with file URL and metadata
- *   6. Return created Note
+ *   4. Convert uploaded image to PDF using Tesseract OCR and PDFKit
+ *   5. Upload to Cloudinary with resource-type inference
+ *   6. Save Note document to MongoDB with file URL and metadata
+ *   7. Return created Note
  *
  * Errors:
  *   - 400 if no file provided
  *   - 400 if file type not supported
  *   - 413 if file exceeds size limit
+ *   - 400 if OCR conversion fails
  *   - 500 if Cloudinary upload fails (with graceful error message)
  *   - 500 if MongoDB save fails
  *
@@ -90,6 +162,9 @@ export async function uploadNote(req, res, next) {
       );
     }
 
+    const processedFile = await prepareUploadedNoteFile(file);
+    const processedMimeType = processedFile.mimetype;
+
     // Extract note metadata from request body
     const { title, course, description, price, previewPages } = req.body || {};
 
@@ -102,8 +177,8 @@ export async function uploadNote(req, res, next) {
     }
 
     // 4. Upload to Cloudinary
-    // Determine resource type based on MIME type
-    const resourceType = ALLOWED_MIME_TYPES[mimeType].category === 'document' ? 'raw' : 'image';
+    // Determine resource type based on the final processed file type
+    const resourceType = processedMimeType === 'application/pdf' ? 'raw' : 'image';
 
     let cloudinaryUploadResult;
     try {
@@ -112,7 +187,7 @@ export async function uploadNote(req, res, next) {
           {
             resource_type: resourceType,
             folder: 'campushustle/notes',
-            public_id: `${req.user._id}_${Date.now()}_${file.originalname
+            public_id: `${req.user._id}_${Date.now()}_${processedFile.originalname
               .replace(/\s+/g, '_')
               .split('.')
               .slice(0, -1)
@@ -129,7 +204,7 @@ export async function uploadNote(req, res, next) {
           }
         );
 
-        uploadStream.end(file.buffer);
+        uploadStream.end(processedFile.buffer);
       });
     } catch (cloudinaryError) {
       console.error('[Cloudinary Upload Error]', cloudinaryError);

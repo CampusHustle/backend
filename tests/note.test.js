@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import Note from '../models/Note.js';
 
 test('Note Schema Model - validates required fields and default values', () => {
@@ -127,6 +130,59 @@ test('Note Upload Response Format - Successful Upload', () => {
   assert.equal(successResponse.success, true);
   assert.ok(successResponse.note.fileUrl.includes('cloudinary'));
   assert.equal(successResponse.note.purchaseCount, 0);
+});
+
+test('Note Upload - Image files are converted to PDF before Cloudinary upload', async () => {
+  const sampleDir = path.join(process.cwd(), 'tests', 'fixtures');
+  const samplePath = path.join(sampleDir, 'ocr-sample.png');
+
+  await fs.mkdir(sampleDir, { recursive: true });
+
+  const powershellScript = [
+    'Add-Type -AssemblyName System.Drawing;',
+    '$bitmap = New-Object System.Drawing.Bitmap 1200,300;',
+    '$graphics = [System.Drawing.Graphics]::FromImage($bitmap);',
+    '$graphics.Clear([System.Drawing.Color]::White);',
+    '$font = New-Object System.Drawing.Font("Arial", 48, [System.Drawing.FontStyle]::Bold);',
+    '$brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::Black);',
+    '$graphics.DrawString("CampusHustle Notes", $font, $brush, 40, 110);',
+    '$graphics.Dispose();',
+    '$bitmap.Save("' + samplePath.replace(/\\/g, '\\\\') + '", [System.Drawing.Imaging.ImageFormat]::Png);',
+    '$bitmap.Dispose();'
+  ].join(' ');
+
+  execFileSync('powershell', ['-NoProfile', '-Command', powershellScript], { stdio: 'inherit' });
+
+  const { processOcrToPdf } = await import('../utils/ocrHelper.js');
+  const tempOutput = path.join(process.cwd(), 'tests', 'fixtures', 'ocr-output.pdf');
+  const result = await processOcrToPdf(samplePath, tempOutput);
+
+  assert.ok(result.extractedText.toLowerCase().includes('campushustle'));
+
+  const pdfBuffer = await fs.readFile(tempOutput);
+  assert.ok(pdfBuffer.includes(Buffer.from('%PDF')));
+
+  await fs.unlink(tempOutput).catch(() => {});
+  await fs.unlink(samplePath).catch(() => {});
+});
+
+test('OCR pipeline rejects low-confidence input instead of returning a false success', async () => {
+  const { prepareUploadedNoteFile } = await import('../controllers/noteController.js');
+
+  const fakeFile = {
+    buffer: Buffer.from('fake-image-data'),
+    originalname: 'blurry-photo.png',
+    mimetype: 'image/png',
+    size: 4096
+  };
+
+  await assert.rejects(
+    () => prepareUploadedNoteFile(fakeFile, async () => ({
+      extractedText: 'maybe',
+      confidence: 12
+    })),
+    /OCR confidence too low|OCR produced no readable text|OCR conversion failed/
+  );
 });
 
 test('Cloudinary Integration - Resource Type Mapping', () => {
