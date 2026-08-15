@@ -94,6 +94,13 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+// Compound and single field indexes for sub-millisecond search query performance (NFR-4)
+userSchema.index({ skillsTeaching: 1 });
+userSchema.index({ department: 1 });
+userSchema.index({ hourlyRate: 1 });
+userSchema.index({ 'rating.knowledge': -1 });
+userSchema.index({ role: 1, isBlocked: 1 });
+
 // Strip security hashes when serializing to JSON
 userSchema.set('toJSON', {
   transform: (doc, ret) => {
