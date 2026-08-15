@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import Note from '../models/Note.js';
 
 test('Note Schema Model - validates required fields and default values', () => {
@@ -46,9 +45,6 @@ test('Note Upload Validation - Allowed MIME Types', async () => {
 });
 
 test('Note Upload Controller - File Validation Logic (Unit)', async () => {
-  // Unit test for file validation constants
-  
-  // Max file sizes in bytes
   const MAX_FILE_SIZES = {
     'application/pdf': 10 * 1024 * 1024,      // 10MB for PDFs
     'image/jpeg': 5 * 1024 * 1024,            // 5MB for JPEG
@@ -56,18 +52,13 @@ test('Note Upload Controller - File Validation Logic (Unit)', async () => {
     'image/webp': 5 * 1024 * 1024             // 5MB for WebP
   };
   
-  // Verify PDF limit is 10MB
   assert.equal(MAX_FILE_SIZES['application/pdf'], 10 * 1024 * 1024);
-  
-  // Verify image limits are 5MB
   assert.equal(MAX_FILE_SIZES['image/jpeg'], 5 * 1024 * 1024);
   assert.equal(MAX_FILE_SIZES['image/png'], 5 * 1024 * 1024);
   assert.equal(MAX_FILE_SIZES['image/webp'], 5 * 1024 * 1024);
   
-  // Test that size validation works correctly
   const testFileSize = 3 * 1024 * 1024; // 3MB
   const pdfMaxSize = MAX_FILE_SIZES['application/pdf'];
-  
   assert.ok(testFileSize <= pdfMaxSize, 'Small PDF should pass validation');
   
   const largeFileSize = 15 * 1024 * 1024; // 15MB
@@ -75,8 +66,6 @@ test('Note Upload Controller - File Validation Logic (Unit)', async () => {
 });
 
 test('Note Upload - Error Handling for Missing Required Fields', () => {
-  // Simulate request validation errors
-  
   const missingTitleError = {
     statusCode: 400,
     code: 'MISSING_REQUIRED_FIELDS',
@@ -108,7 +97,6 @@ test('Note Upload - Error Handling for Missing Required Fields', () => {
 });
 
 test('Note Upload Response Format - Successful Upload', () => {
-  // Verify successful response structure
   const successResponse = {
     success: true,
     message: 'Note uploaded successfully.',
@@ -135,26 +123,15 @@ test('Note Upload Response Format - Successful Upload', () => {
 test('Note Upload - Image files are converted to PDF before Cloudinary upload', async () => {
   const sampleDir = path.join(process.cwd(), 'tests', 'fixtures');
   const samplePath = path.join(sampleDir, 'ocr-sample.png');
+  const tempOutput = path.join(sampleDir, 'ocr-output.pdf');
 
   await fs.mkdir(sampleDir, { recursive: true });
 
-  const powershellScript = [
-    'Add-Type -AssemblyName System.Drawing;',
-    '$bitmap = New-Object System.Drawing.Bitmap 1200,300;',
-    '$graphics = [System.Drawing.Graphics]::FromImage($bitmap);',
-    '$graphics.Clear([System.Drawing.Color]::White);',
-    '$font = New-Object System.Drawing.Font("Arial", 48, [System.Drawing.FontStyle]::Bold);',
-    '$brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::Black);',
-    '$graphics.DrawString("CampusHustle Notes", $font, $brush, 40, 110);',
-    '$graphics.Dispose();',
-    '$bitmap.Save("' + samplePath.replace(/\\/g, '\\\\') + '", [System.Drawing.Imaging.ImageFormat]::Png);',
-    '$bitmap.Dispose();'
-  ].join(' ');
-
-  execFileSync('powershell', ['-NoProfile', '-Command', powershellScript], { stdio: 'inherit' });
+  // Generate pure Node.js PNG fixture without PowerShell
+  const samplePngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  await fs.writeFile(samplePath, Buffer.from(samplePngBase64, 'base64'));
 
   const { processOcrToPdf } = await import('../utils/ocrHelper.js');
-  const tempOutput = path.join(process.cwd(), 'tests', 'fixtures', 'ocr-output.pdf');
   const result = await processOcrToPdf(samplePath, tempOutput);
 
   assert.ok(result.extractedText.toLowerCase().includes('campushustle'));
@@ -186,10 +163,9 @@ test('OCR pipeline rejects low-confidence input instead of returning a false suc
 });
 
 test('Cloudinary Integration - Resource Type Mapping', () => {
-  // Verify correct resource type for different MIME types
   const resourceTypeMap = {
-    'application/pdf': 'raw',           // PDFs uploaded as raw
-    'image/jpeg': 'image',              // Images uploaded as images
+    'application/pdf': 'raw',
+    'image/jpeg': 'image',
     'image/png': 'image',
     'image/webp': 'image'
   };
