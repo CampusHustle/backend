@@ -7,7 +7,7 @@ import { AppError } from '../middleware/errorHandler.js';
 export async function getMe(req, res, next) {
   try {
     const user = await userService.getProfile(req.user._id);
-    res.status(200).json({ user });
+    res.status(200).json({ success: true, user });
   } catch (error) {
     next(error);
   }
@@ -24,19 +24,27 @@ export async function updateMe(req, res, next) {
     }
 
     const updatedUser = await userService.updateProfile(req.user._id, req.body);
-    res.status(200).json({ user: updatedUser });
+    res.status(200).json({ success: true, user: updatedUser });
   } catch (error) {
     next(error);
   }
 }
 
 /**
- * Controller to search tutors by subject, name, department, or rating.
+ * Controller to search tutors by subject, price, rating, department, or name.
+ * Satisfies FR-4.
  */
 export async function searchTutors(req, res, next) {
   try {
-    const tutors = await userService.searchTutors(req.query);
-    res.status(200).json({ tutors });
+    const result = await userService.searchTutors(req.query);
+    res.status(200).json({
+      success: true,
+      count: result.tutors.length,
+      tutors: result.tutors,
+      total: result.total,
+      page: result.page,
+      totalPages: result.totalPages
+    });
   } catch (error) {
     next(error);
   }
@@ -53,7 +61,7 @@ export async function getUserById(req, res, next) {
     }
 
     const user = await userService.getPublicProfile(id);
-    res.status(200).json({ user });
+    res.status(200).json({ success: true, user });
   } catch (error) {
     next(error);
   }

@@ -1,12 +1,13 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "CampusHustle Backend REST API & Services",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "lint": "node --check index.js app.js",
     "test": "node --test"
   },
   "keywords": [],
