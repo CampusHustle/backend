@@ -47,6 +47,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: ''
     },
+    hourlyRate: {
+      type: Number,
+      default: 0,
+      min: [0, 'Hourly rate cannot be negative']
+    },
     skillsTeaching: {
       type: [String],
       default: []
