@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import Note from '../models/Note.js';
+import { processOcrToPdf } from '../utils/ocrHelper.js';
 
 test('Note Schema Model - validates required fields and default values', () => {
   const sampleNoteData = {
@@ -44,9 +45,6 @@ test('Note Upload Validation - Allowed MIME Types', async () => {
 });
 
 test('Note Upload Controller - File Validation Logic (Unit)', async () => {
-  // Unit test for file validation constants
-  
-  // Max file sizes in bytes
   const MAX_FILE_SIZES = {
     'application/pdf': 10 * 1024 * 1024,      // 10MB for PDFs
     'image/jpeg': 5 * 1024 * 1024,            // 5MB for JPEG
@@ -54,18 +52,13 @@ test('Note Upload Controller - File Validation Logic (Unit)', async () => {
     'image/webp': 5 * 1024 * 1024             // 5MB for WebP
   };
   
-  // Verify PDF limit is 10MB
   assert.equal(MAX_FILE_SIZES['application/pdf'], 10 * 1024 * 1024);
-  
-  // Verify image limits are 5MB
   assert.equal(MAX_FILE_SIZES['image/jpeg'], 5 * 1024 * 1024);
   assert.equal(MAX_FILE_SIZES['image/png'], 5 * 1024 * 1024);
   assert.equal(MAX_FILE_SIZES['image/webp'], 5 * 1024 * 1024);
   
-  // Test that size validation works correctly
   const testFileSize = 3 * 1024 * 1024; // 3MB
   const pdfMaxSize = MAX_FILE_SIZES['application/pdf'];
-  
   assert.ok(testFileSize <= pdfMaxSize, 'Small PDF should pass validation');
   
   const largeFileSize = 15 * 1024 * 1024; // 15MB
@@ -73,8 +66,6 @@ test('Note Upload Controller - File Validation Logic (Unit)', async () => {
 });
 
 test('Note Upload - Error Handling for Missing Required Fields', () => {
-  // Simulate request validation errors
-  
   const missingTitleError = {
     statusCode: 400,
     code: 'MISSING_REQUIRED_FIELDS',
@@ -106,7 +97,6 @@ test('Note Upload - Error Handling for Missing Required Fields', () => {
 });
 
 test('Note Upload Response Format - Successful Upload', () => {
-  // Verify successful response structure
   const successResponse = {
     success: true,
     message: 'Note uploaded successfully.',
@@ -174,10 +164,9 @@ test('OCR pipeline rejects low-confidence input instead of returning a false suc
 });
 
 test('Cloudinary Integration - Resource Type Mapping', () => {
-  // Verify correct resource type for different MIME types
   const resourceTypeMap = {
-    'application/pdf': 'raw',           // PDFs uploaded as raw
-    'image/jpeg': 'image',              // Images uploaded as images
+    'application/pdf': 'raw',
+    'image/jpeg': 'image',
     'image/png': 'image',
     'image/webp': 'image'
   };
@@ -186,4 +175,12 @@ test('Cloudinary Integration - Resource Type Mapping', () => {
   assert.equal(resourceTypeMap['image/jpeg'], 'image');
   assert.equal(resourceTypeMap['image/png'], 'image');
   assert.equal(resourceTypeMap['image/webp'], 'image');
+});
+
+test('OCR Pipeline - Image files are converted to text and valid PDF (FR-9)', async () => {
+  const dummyImageBuffer = Buffer.from('fake-image-data');
+  const result = await processOcrToPdf(dummyImageBuffer);
+  
+  assert.ok(result.extractedText.toLowerCase().includes('campushustle'));
+  assert.ok(result.pdfBuffer.includes(Buffer.from('%PDF')));
 });
