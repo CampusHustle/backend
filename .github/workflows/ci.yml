@@ -28,6 +28,11 @@ jobs:
         image: mongo:7
         ports:
           - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     env:
       NODE_ENV: test
@@ -67,9 +72,21 @@ jobs:
         run: |
           node index.js &
           SERVER_PID=$!
-          sleep 4
-          curl --fail --retry 3 --retry-delay 2 -s http://127.0.0.1:5000/api/health | grep '"status":"ok"'
-          kill $SERVER_PID
+          
+          # Poll health endpoint up to 10 attempts
+          for i in {1..10}; do
+            if curl -s http://127.0.0.1:5000/api/health | grep '"status":"ok"'; then
+              echo "Server is healthy!"
+              kill $SERVER_PID
+              exit 0
+            fi
+            echo "Waiting for server to be ready (attempt $i/10)..."
+            sleep 1
+          done
+          
+          echo "Health check timed out."
+          kill $SERVER_PID || true
+          exit 1
 
   # =========================================================================
   # 2. Continuous Deployment (CD): Production Deployment (Render)
