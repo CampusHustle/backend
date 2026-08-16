@@ -49,13 +49,28 @@ function generateVerificationToken(userId, email) {
  */
 export async function registerUser({ email, password, name, university, department, year, role }) {
   const normalizedEmail = email.trim().toLowerCase();
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
 
-  // Validate university email domain requirement
+  // Validate university email domain requirement (FR-1)
   if (!isUniversityEmail(normalizedEmail)) {
     throw new AppError('Registration restricted strictly to valid university email addresses ending with .edu.et', 400, 'INVALID_UNIVERSITY_EMAIL');
   }
 
-  // Check existing account
+  // Validate name is non-empty
+  if (!trimmedName) {
+    throw new AppError('Name is required and cannot be blank.', 400, 'VALIDATION_ERROR');
+  }
+
+  // Validate year is within an acceptable academic range
+  const parsedYear = year ? parseInt(year, 10) : 1;
+  if (isNaN(parsedYear) || parsedYear < 1 || parsedYear > 6) {
+    throw new AppError('Year must be a number between 1 and 6.', 400, 'VALIDATION_ERROR');
+  }
+
+  // Prevent admin role self-assignment at registration
+  const userRole = role && ['student', 'tutor'].includes(role) ? role : 'student';
+
+  // Check existing account — after validation to avoid leaking email existence on invalid inputs
   const existingUser = await User.findOne({ email: normalizedEmail });
   if (existingUser) {
     throw new AppError('An account with this email address already exists.', 409, 'EMAIL_EXISTS');
@@ -65,16 +80,14 @@ export async function registerUser({ email, password, name, university, departme
   const salt = await bcrypt.genSalt(10);
   const passwordHash = await bcrypt.hash(password, salt);
 
-  const userRole = role && ['student', 'tutor'].includes(role) ? role : 'student';
-
   const newUser = new User({
-    name,
+    name: trimmedName,
     email: normalizedEmail,
     passwordHash,
     role: userRole,
-    university,
-    department: department || '',
-    year: year ? parseInt(year, 10) : 1,
+    university: university.trim(),
+    department: department ? department.trim() : '',
+    year: parsedYear,
     isEmailVerified: false // Requires email verification flow
   });
 
