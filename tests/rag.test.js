@@ -3,25 +3,18 @@ import assert from 'node:assert/strict';
 import NoteChunk from '../models/NoteChunk.js';
 import {
   EMBEDDING_DIMENSION,
-<<<<<<< HEAD
   CANNOT_ANSWER_FALLBACK,
-=======
->>>>>>> origin/develop
   generateMockEmbedding,
   generateEmbedding,
   batchGenerateEmbeddings,
   processAndStoreNoteChunks,
   getChunksByNote,
   getChunksByTutor,
-<<<<<<< HEAD
   deleteChunksByNote,
   cosineSimilarity,
   searchChunksBySimilarity,
   generateGroundedAnswer,
   askTutorAssistant
-=======
-  deleteChunksByNote
->>>>>>> origin/develop
 } from '../services/ragService.js';
 import { validateChunk } from '../utils/chunkingUtils.js';
 
@@ -70,15 +63,9 @@ test('generateMockEmbedding - rejects invalid or empty input strings', () => {
   );
 });
 
-<<<<<<< HEAD
-test('generateEmbedding - falls back to deterministic mock embedding when Gemini is unconfigured (NFR-10)', async () => {
-  const text = 'Calculus III: Multivariable differentiation and vector fields';
-  const embedding = await generateEmbedding(text, { apiKey: 'mock_key' });
-=======
 test('generateEmbedding - falls back to deterministic mock embedding when API key is missing (NFR-10)', async () => {
   const text = 'Calculus III: Multivariable differentiation and vector fields';
   const embedding = await generateEmbedding(text, { apiKey: '' });
->>>>>>> origin/develop
 
   assert.ok(Array.isArray(embedding));
   assert.equal(embedding.length, 768);
@@ -112,13 +99,6 @@ test('generateEmbedding - calls Gemini API and parses 768-dim values correctly',
 });
 
 test('generateEmbedding - handles 429 rate limits gracefully per NFR-10', async () => {
-<<<<<<< HEAD
-  const mockFetch = async () => ({
-    ok: false,
-    status: 429,
-    text: async () => 'Quota exceeded'
-  });
-=======
   let attempts = 0;
   const mockFetch = async () => {
     attempts++;
@@ -128,7 +108,6 @@ test('generateEmbedding - handles 429 rate limits gracefully per NFR-10', async 
       text: async () => 'Quota exceeded'
     };
   };
->>>>>>> origin/develop
 
   await assert.rejects(
     () => generateEmbedding('Test', { apiKey: 'test-gemini-key', fetchFn: mockFetch }),
@@ -187,11 +166,7 @@ test('batchGenerateEmbeddings - generates embeddings for multiple chunks', async
     'File Systems and Disk Scheduling algorithms'
   ];
 
-<<<<<<< HEAD
-  const embeddings = await batchGenerateEmbeddings(texts, { apiKey: 'mock_key' });
-=======
   const embeddings = await batchGenerateEmbeddings(texts);
->>>>>>> origin/develop
 
   assert.equal(embeddings.length, 3);
   embeddings.forEach((emb, i) => {
@@ -280,22 +255,15 @@ test('processAndStoreNoteChunks - segments multi-page note, generates 768-dim em
     const result = await processAndStoreNoteChunks(
       'note507f1f77bcf86cd799439011',
       'tutor507f1f77bcf86cd799439022',
-<<<<<<< HEAD
       textSegments,
       { apiKey: 'mock_key' }
-=======
-      textSegments
->>>>>>> origin/develop
     );
 
     assert.equal(result.success, true);
     assert.equal(result.count, 4, 'Should create 4 distinct chunks across 2 pages');
     assert.equal(insertedDocs.length, 4);
 
-<<<<<<< HEAD
-=======
     // Verify each chunk has proper noteId, tutorId, pageNumber, chunkIndex, and 768-dim embedding
->>>>>>> origin/develop
     insertedDocs.forEach((chunk, i) => {
       assert.equal(chunk.noteId, 'note507f1f77bcf86cd799439011');
       assert.equal(chunk.tutorId, 'tutor507f1f77bcf86cd799439022');
@@ -305,18 +273,12 @@ test('processAndStoreNoteChunks - segments multi-page note, generates 768-dim em
       assert.ok(Array.isArray(chunk.embedding), 'Must include vector embedding');
       assert.equal(chunk.embedding.length, 768, 'Must have 768 dimensions');
 
-<<<<<<< HEAD
-=======
       // Verify NoteChunk schema validity
->>>>>>> origin/develop
       const validation = validateChunk(chunk);
       assert.equal(validation.valid, true, `Chunk ${i} must satisfy all constraints: ${validation.errors.join(', ')}`);
     });
 
-<<<<<<< HEAD
-=======
     // Check page numbers
->>>>>>> origin/develop
     assert.equal(insertedDocs[0].pageNumber, 1);
     assert.equal(insertedDocs[1].pageNumber, 1);
     assert.equal(insertedDocs[2].pageNumber, 2);
@@ -327,7 +289,6 @@ test('processAndStoreNoteChunks - segments multi-page note, generates 768-dim em
 });
 
 // ============================================================================
-<<<<<<< HEAD
 // Section 4: Unit Tests — Cosine Similarity Algorithm (Day 10)
 // ============================================================================
 
@@ -399,8 +360,13 @@ test('searchChunksBySimilarity - enforces strict tutorId scoping (STRIDE Info Di
     assert.equal(results.length, 1);
     assert.equal(results[0].tutorId, tutorAId);
     assert.ok(results[0].similarityScore > 0.9);
-=======
-// Section 4: Integration Tests — Scoped Queries & Ownership Security
+  } finally {
+    NoteChunk.find = originalFind;
+  }
+});
+
+// ============================================================================
+// Section 6: Integration Tests — Scoped Queries & Ownership Security
 // ============================================================================
 
 test('getChunksByNote - retrieves chunks for a specific note ordered by chunkIndex', async () => {
@@ -426,13 +392,11 @@ test('getChunksByNote - retrieves chunks for a specific note ordered by chunkInd
     const chunks = await getChunksByNote('n1');
     assert.equal(chunks.length, 2);
     assert.equal(chunks[0].text, 'Part 1');
->>>>>>> origin/develop
   } finally {
     NoteChunk.find = originalFind;
   }
 });
 
-<<<<<<< HEAD
 test('searchChunksBySimilarity - returns empty array when tutor has no uploaded chunks', async () => {
   const originalFind = NoteChunk.find;
   try {
@@ -514,26 +478,10 @@ test('askTutorAssistant - full end-to-end flow with grounded answer and fallback
         status: 200,
         json: async () => ({
           candidates: [{ content: { parts: [{ text: 'Derivatives measure the instantaneous rate of change.' }] } }]
-=======
-test('getChunksByTutor - retrieves tutor-scoped chunks for AI Q&A (FR-11, UC-10)', async () => {
-  const originalFind = NoteChunk.find;
-  try {
-    const mockChunks = [
-      { _id: 'c1', tutorId: 'tutor1', text: 'Tutor 1 material' },
-      { _id: 'c2', tutorId: 'tutor1', text: 'Tutor 1 extra' }
-    ];
-
-    NoteChunk.find = (filter) => {
-      assert.equal(filter.tutorId, 'tutor1');
-      return {
-        sort: () => ({
-          select: () => Promise.resolve(mockChunks)
->>>>>>> origin/develop
         })
       };
     };
 
-<<<<<<< HEAD
     // 1. Related question -> grounded answer
     const relatedResult = await askTutorAssistant(tutorId, 'What do derivatives measure?', {
       apiKey: 'test-gemini-key',
@@ -553,16 +501,35 @@ test('getChunksByTutor - retrieves tutor-scoped chunks for AI Q&A (FR-11, UC-10)
     assert.equal(unrelatedResult.grounded, false);
     assert.equal(unrelatedResult.answer, CANNOT_ANSWER_FALLBACK);
     assert.equal(unrelatedResult.sources.length, 0);
-=======
-    const chunks = await getChunksByTutor('tutor1');
-    assert.equal(chunks.length, 2);
->>>>>>> origin/develop
   } finally {
     NoteChunk.find = originalFind;
   }
 });
 
-<<<<<<< HEAD
+test('getChunksByTutor - retrieves tutor-scoped chunks for AI Q&A (FR-11, UC-10)', async () => {
+  const originalFind = NoteChunk.find;
+  try {
+    const mockChunks = [
+      { _id: 'c1', tutorId: 'tutor1', text: 'Tutor 1 material' },
+      { _id: 'c2', tutorId: 'tutor1', text: 'Tutor 1 extra' }
+    ];
+
+    NoteChunk.find = (filter) => {
+      assert.equal(filter.tutorId, 'tutor1');
+      return {
+        sort: () => ({
+          select: () => Promise.resolve(mockChunks)
+        })
+      };
+    };
+
+    const chunks = await getChunksByTutor('tutor1');
+    assert.equal(chunks.length, 2);
+  } finally {
+    NoteChunk.find = originalFind;
+  }
+});
+
 test('askTutorAssistant - validates input question constraints', async () => {
   await assert.rejects(
     () => askTutorAssistant(null, 'Valid question?'),
@@ -579,7 +546,8 @@ test('askTutorAssistant - validates input question constraints', async () => {
     () => askTutorAssistant('tutor123', hugeQuestion), // > 1000 chars
     (err) => err.code === 'QUESTION_TOO_LONG'
   );
-=======
+});
+
 test('deleteChunksByNote - enforces tutor ownership on deletion (STRIDE Tampering/Elevation of Privilege)', async () => {
   const originalDeleteMany = NoteChunk.deleteMany;
   try {
@@ -595,5 +563,4 @@ test('deleteChunksByNote - enforces tutor ownership on deletion (STRIDE Tamperin
   } finally {
     NoteChunk.deleteMany = originalDeleteMany;
   }
->>>>>>> origin/develop
 });
