@@ -199,6 +199,12 @@ export async function verifyUserEmail(token) {
  */
 export async function resendVerificationEmail(email) {
   const normalizedEmail = email.trim().toLowerCase();
+
+  // Guard against non-university emails being used to probe the system (STRIDE: Spoofing)
+  if (!isUniversityEmail(normalizedEmail)) {
+    throw new AppError('Only valid university email addresses ending in .edu.et are accepted.', 400, 'INVALID_UNIVERSITY_EMAIL');
+  }
+
   const user = await User.findOne({ email: normalizedEmail }).select('+emailVerificationTokenHash');
 
   if (!user) {
@@ -214,7 +220,13 @@ export async function resendVerificationEmail(email) {
   user.emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
   await user.save();
 
-  return { message: 'Verification token generated successfully.', verificationToken };
+  // Resend verification email
+  await sendVerificationEmail(user.email, verificationToken);
+
+  return {
+    message: 'Verification email resent successfully.',
+    ...(process.env.NODE_ENV !== 'production' && { verificationToken })
+  };
 }
 
 /**
