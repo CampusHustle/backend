@@ -1,11 +1,23 @@
-import express from "express";
+import express from 'express';
 import {
-  getTutorAvailability,
   createAvailability,
-} from "../controllers/availabilityController";
+  getTutorAvailability,
+  getMyAvailability,
+  updateAvailability,
+  deleteAvailability,
+} from '../controllers/availabilityController.js';
+import { requireAuth } from '../middleware/auth.js';
+
 const router = express.Router();
 
-router.post("/", createAvailability);
-router.get("/:tutorId", getTutorAvailability);
+// Private tutor routes
+router.post('/', requireAuth, createAvailability);
+router.get('/me', requireAuth, getMyAvailability);
+router.put('/:id', requireAuth, updateAvailability);
+router.delete('/:id', requireAuth, deleteAvailability);
+
+// Public / Authenticated tutor slot lookup
+router.get('/tutor/:tutorId', getTutorAvailability);
+router.get('/:tutorId', getTutorAvailability);
 
 export default router;
