@@ -1,5 +1,5 @@
-import mongoose from 'mongoose';
-import { config } from './env.js';
+import mongoose from "mongoose";
+import { config } from "./env.js";
 
 /**
  * Connects to MongoDB with retry logic to ensure resilience in CI/CD and production environments.
