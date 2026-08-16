@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { writeActionRateLimiter } from '../middleware/rateLimiter.js';
 import { uploadNote, getNotesByTutor, getNoteById, purchaseNote } from '../controllers/noteController.js';
 
 const router = Router();
@@ -59,7 +60,7 @@ const upload = multer({
  * NFR-1 compliance: Auth via JWT
  * NFR-10 compliance: Graceful error if Cloudinary rate-limited
  */
-router.post('/', requireAuth, upload.single('file'), uploadNote);
+router.post('/', writeActionRateLimiter, requireAuth, upload.single('file'), uploadNote);
 
 /**
  * GET /notes/tutor/:tutorId
@@ -125,6 +126,6 @@ router.get('/:noteId', getNoteById);
  * FR-10 compliance: System supports pricing and purchase of notes
  * NFR-1 compliance: Auth via JWT
  */
-router.post('/:noteId/purchase', requireAuth, purchaseNote);
+router.post('/:noteId/purchase', writeActionRateLimiter, requireAuth, purchaseNote);
 
 export default router;

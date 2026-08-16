@@ -177,6 +177,26 @@ export async function uploadNote(req, res, next) {
       );
     }
 
+    // Validate price if provided (Fail fast before Cloudinary upload)
+    let parsedPrice = 0;
+    if (price !== undefined && price !== null && price !== '') {
+      parsedPrice = parseFloat(price);
+      if (!Number.isFinite(parsedPrice)) {
+        throw new AppError(
+          'Price must be a valid number.',
+          400,
+          'INVALID_PRICE_FORMAT'
+        );
+      }
+      if (parsedPrice < 0 || parsedPrice > 100000) {
+        throw new AppError(
+          'Price must be between 0 and 100,000.',
+          400,
+          'PRICE_OUT_OF_RANGE'
+        );
+      }
+    }
+
     // 4. Upload to Cloudinary
     // Determine resource type based on the final processed file type
     const resourceType = processedMimeType === 'application/pdf' ? 'raw' : 'image';
@@ -217,25 +237,6 @@ export async function uploadNote(req, res, next) {
     }
 
     // 5. Save Note document to MongoDB
-    // Validate price if provided (Day 6: FR-10 pricing support)
-    let parsedPrice = 0;
-    if (price !== undefined && price !== null && price !== '') {
-      parsedPrice = parseFloat(price);
-      if (!Number.isFinite(parsedPrice)) {
-        throw new AppError(
-          'Price must be a valid number.',
-          400,
-          'INVALID_PRICE_FORMAT'
-        );
-      }
-      if (parsedPrice < 0 || parsedPrice > 100000) {
-        throw new AppError(
-          'Price must be between 0 and 100,000.',
-          400,
-          'PRICE_OUT_OF_RANGE'
-        );
-      }
-    }
 
     const note = new Note({
       tutorId: req.user._id,
