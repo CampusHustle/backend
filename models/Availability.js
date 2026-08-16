@@ -1,54 +1,62 @@
-import mongoose from "mongoose";
+import mongoose from 'mongoose';
 
 const availabilitySchema = new mongoose.Schema(
   {
     tutorId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+      ref: 'User',
+      required: [true, 'Tutor ID is required'],
       index: true,
     },
-
     dayOfWeek: {
       type: String,
-      enum: [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-      ],
-      required: true,
+      enum: {
+        values: [
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+          'Sunday',
+        ],
+        message: '{VALUE} is not a valid day of the week',
+      },
+      required: [true, 'Day of week is required'],
     },
-
     startTime: {
       type: String,
-      required: true,
-      match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
+      required: [true, 'Start time is required'],
+      match: [
+        /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
+        'Start time must be in HH:MM format (24-hour)',
+      ],
     },
-
     endTime: {
       type: String,
-      required: true,
-      match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
+      required: [true, 'End time is required'],
+      match: [
+        /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
+        'End time must be in HH:MM format (24-hour)',
+      ],
+      validate: {
+        validator: function (v) {
+          if (!this.startTime || !v) return true;
+          const [startH, startM] = this.startTime.split(':').map(Number);
+          const [endH, endM] = v.split(':').map(Number);
+          return (endH * 60 + endM) > (startH * 60 + startM);
+        },
+        message: 'End time must be strictly after start time',
+      },
     },
-
     isBooked: {
       type: Boolean,
       default: false,
     },
-
-    imgUrl: {
-      type: String,
-      required: true,
-      default: "https://placehold.co/600x400?text=Image+Not+Found",
-    },
   },
   {
     timestamps: true,
-  },
+  }
 );
 
 availabilitySchema.index({
@@ -57,4 +65,5 @@ availabilitySchema.index({
   isBooked: 1,
 });
 
-export const Availability = mongoose.model("Availability", availabilitySchema);
+export const Availability = mongoose.model('Availability', availabilitySchema);
+export default Availability;
