@@ -194,6 +194,23 @@ test('validateChunk - accepts null embedding (Day 7)', () => {
   assert.equal(result.valid, true, 'Should accept null embedding (Day 7 stub)');
 });
 
+test('validateChunk - accepts valid 768-dimensional embedding vector (Day 9)', async () => {
+  const { generateMockEmbedding } = await import('../services/ragService.js');
+  const validVector = generateMockEmbedding('Content for embedding testing');
+  
+  const chunk = {
+    text: 'Content for embedding testing',
+    pageNumber: 1,
+    chunkIndex: 0,
+    charCount: 29,
+    embedding: validVector
+  };
+
+  const result = validateChunk(chunk);
+  assert.equal(result.valid, true, 'Should accept valid 768-dimensional embedding');
+  assert.equal(result.errors.length, 0);
+});
+
 test('validateChunk - rejects invalid embedding format', () => {
   const chunk = {
     text: 'Content',
