@@ -1,6 +1,11 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import Note from '../models/Note.js';
+import Purchase from '../models/Purchase.js';
 import cloudinary from '../config/cloudinary.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { processOcrToPdf } from '../utils/ocrHelper.js';
 
 /**
  * Supported file types for note uploads.
@@ -27,22 +32,90 @@ const MAX_FILE_SIZE = {
   'image/webp': 5 * 1024 * 1024             // 5MB for WebP
 };
 
+export async function prepareUploadedNoteFile(file, ocrRunner = processOcrToPdf) {
+  const mimeType = file.mimetype;
+
+  if (!ALLOWED_MIME_TYPES[mimeType]) {
+    const supportedTypes = Object.keys(ALLOWED_MIME_TYPES).join(', ');
+    throw new AppError(
+      `Unsupported file type: ${mimeType}. Supported types: ${supportedTypes}`,
+      400,
+      'UNSUPPORTED_FILE_TYPE'
+    );
+  }
+
+  if (mimeType === 'application/pdf') {
+    return file;
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'campushustle-ocr-'));
+  const originalBaseName = path.basename(file.originalname || 'note', path.extname(file.originalname || 'note')) || 'note';
+  const inputPath = path.join(tempDir, `${originalBaseName}${path.extname(file.originalname || '.png') || '.png'}`);
+  const outputPath = path.join(tempDir, `${originalBaseName}.pdf`);
+
+  try {
+    await fs.writeFile(inputPath, file.buffer);
+    const ocrResult = await ocrRunner(inputPath, outputPath);
+    const extractedText = typeof ocrResult === 'object' && ocrResult && ocrResult.extractedText ? ocrResult.extractedText : '';
+    const confidence = typeof ocrResult === 'object' && ocrResult && Number.isFinite(Number(ocrResult.confidence)) ? Number(ocrResult.confidence) : 100;
+
+    if (!extractedText.trim()) {
+      throw new AppError(
+        'OCR produced no readable text. Please upload a clearer image or a PDF instead.',
+        400,
+        'OCR_NO_TEXT_FOUND'
+      );
+    }
+
+    if (confidence > 0 && confidence < 45) {
+      throw new AppError(
+        `OCR confidence too low (${confidence}%). Please upload a clearer image or a PDF instead.`,
+        400,
+        'OCR_LOW_CONFIDENCE'
+      );
+    }
+
+    const convertedBuffer = await fs.readFile(outputPath);
+
+    return {
+      ...file,
+      buffer: convertedBuffer,
+      mimetype: 'application/pdf',
+      originalname: `${originalBaseName}.pdf`,
+      size: convertedBuffer.length
+    };
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError(
+      'OCR conversion failed. Please upload a clearer image or a PDF instead.',
+      400,
+      'OCR_PROCESSING_FAILED'
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /**
  * Upload a note file to Cloudinary and save metadata to MongoDB.
- * Supports both PDF uploads and image uploads (for later OCR processing in Day 5).
+ * Supports both PDF uploads and image uploads, converting images to PDF with Tesseract OCR.
  *
  * Flow:
  *   1. Validate file presence
  *   2. Validate MIME type (FR-9 compliance, NFR security)
  *   3. Validate file size (NFR storage limits)
- *   4. Upload to Cloudinary with resource-type inference
- *   5. Save Note document to MongoDB with file URL and metadata
- *   6. Return created Note
+ *   4. Convert uploaded image to PDF using Tesseract OCR and PDFKit
+ *   5. Upload to Cloudinary with resource-type inference
+ *   6. Save Note document to MongoDB with file URL and metadata
+ *   7. Return created Note
  *
  * Errors:
  *   - 400 if no file provided
  *   - 400 if file type not supported
  *   - 413 if file exceeds size limit
+ *   - 400 if OCR conversion fails
  *   - 500 if Cloudinary upload fails (with graceful error message)
  *   - 500 if MongoDB save fails
  *
@@ -90,6 +163,9 @@ export async function uploadNote(req, res, next) {
       );
     }
 
+    const processedFile = await prepareUploadedNoteFile(file);
+    const processedMimeType = processedFile.mimetype;
+
     // Extract note metadata from request body
     const { title, course, description, price, previewPages } = req.body || {};
 
@@ -102,8 +178,8 @@ export async function uploadNote(req, res, next) {
     }
 
     // 4. Upload to Cloudinary
-    // Determine resource type based on MIME type
-    const resourceType = ALLOWED_MIME_TYPES[mimeType].category === 'document' ? 'raw' : 'image';
+    // Determine resource type based on the final processed file type
+    const resourceType = processedMimeType === 'application/pdf' ? 'raw' : 'image';
 
     let cloudinaryUploadResult;
     try {
@@ -112,7 +188,7 @@ export async function uploadNote(req, res, next) {
           {
             resource_type: resourceType,
             folder: 'campushustle/notes',
-            public_id: `${req.user._id}_${Date.now()}_${file.originalname
+            public_id: `${req.user._id}_${Date.now()}_${processedFile.originalname
               .replace(/\s+/g, '_')
               .split('.')
               .slice(0, -1)
@@ -129,7 +205,7 @@ export async function uploadNote(req, res, next) {
           }
         );
 
-        uploadStream.end(file.buffer);
+        uploadStream.end(processedFile.buffer);
       });
     } catch (cloudinaryError) {
       console.error('[Cloudinary Upload Error]', cloudinaryError);
@@ -141,13 +217,33 @@ export async function uploadNote(req, res, next) {
     }
 
     // 5. Save Note document to MongoDB
+    // Validate price if provided (Day 6: FR-10 pricing support)
+    let parsedPrice = 0;
+    if (price !== undefined && price !== null && price !== '') {
+      parsedPrice = parseFloat(price);
+      if (!Number.isFinite(parsedPrice)) {
+        throw new AppError(
+          'Price must be a valid number.',
+          400,
+          'INVALID_PRICE_FORMAT'
+        );
+      }
+      if (parsedPrice < 0 || parsedPrice > 100000) {
+        throw new AppError(
+          'Price must be between 0 and 100,000.',
+          400,
+          'PRICE_OUT_OF_RANGE'
+        );
+      }
+    }
+
     const note = new Note({
       tutorId: req.user._id,
       title: title.trim(),
       course: course.trim(),
       description: description ? description.trim() : '',
       fileUrl: cloudinaryUploadResult.secure_url,
-      price: parseFloat(price) || 0,
+      price: parsedPrice,
       previewPages: parseInt(previewPages) || 3
     });
 
@@ -210,6 +306,101 @@ export async function getNoteById(req, res, next) {
     res.status(200).json({
       success: true,
       note
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Record a note purchase for a student.
+ * 
+ * Day 6 Stub: Creates a Purchase record with "pending" status.
+ * Chapa payment integration deferred to Day 9.
+ * 
+ * FR-10 compliance: System supports preview, pricing, and purchase of notes.
+ * 
+ * Flow:
+ *   1. Validate note exists
+ *   2. Check student has not already purchased this note
+ *   3. Create Purchase record with pending status
+ *   4. Increment note's purchaseCount
+ *   5. Return purchase record
+ * 
+ * Errors:
+ *   - 404 if note not found
+ *   - 400 if student has already purchased this note
+ *   - 400 if note price is invalid
+ *   - 403 if student tries to purchase own note
+ * 
+ * @param {Express.Request} req - Express request object
+ *   - req.params.noteId: ID of the note to purchase
+ *   - req.user: Authenticated student from requireAuth middleware
+ * @param {Express.Response} res - Express response object
+ * @param {Function} next - Express next() error handler
+ */
+export async function purchaseNote(req, res, next) {
+  try {
+    const { noteId } = req.params;
+    const studentId = req.user._id;
+
+    // 1. Validate note exists
+    const note = await Note.findById(noteId);
+    if (!note) {
+      throw new AppError('Note not found.', 404, 'NOTE_NOT_FOUND');
+    }
+
+    // 2. Prevent tutors from "purchasing" their own notes
+    if (note.tutorId.toString() === studentId.toString()) {
+      throw new AppError(
+        'Tutors cannot purchase their own notes.',
+        403,
+        'CANNOT_PURCHASE_OWN_NOTE'
+      );
+    }
+
+    // 3. Check if student has already purchased this note
+    const existingPurchase = await Purchase.findOne({
+      studentId,
+      noteId
+    });
+
+    if (existingPurchase) {
+      throw new AppError(
+        'You have already purchased this note.',
+        400,
+        'NOTE_ALREADY_PURCHASED'
+      );
+    }
+
+    // 4. Validate price
+    if (!Number.isFinite(note.price) || note.price < 0) {
+      throw new AppError(
+        'Invalid note price.',
+        400,
+        'INVALID_NOTE_PRICE'
+      );
+    }
+
+    // 5. Create Purchase record (status: pending, awaiting Chapa integration on Day 9)
+    const purchase = new Purchase({
+      studentId,
+      noteId,
+      tutorId: note.tutorId,
+      price: note.price,
+      status: 'pending'
+    });
+
+    const savedPurchase = await purchase.save();
+
+    // 6. Increment note's purchaseCount
+    await Note.findByIdAndUpdate(noteId, { $inc: { purchaseCount: 1 } });
+
+    // 7. Return purchase record
+    res.status(201).json({
+      success: true,
+      message: 'Note purchase initiated. Awaiting payment confirmation.',
+      purchase: savedPurchase
     });
   } catch (error) {
     next(error);

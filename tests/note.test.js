@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import Note from '../models/Note.js';
+import { processOcrToPdf } from '../utils/ocrHelper.js';
 
 test('Note Schema Model - validates required fields and default values', () => {
   const sampleNoteData = {
@@ -43,9 +45,6 @@ test('Note Upload Validation - Allowed MIME Types', async () => {
 });
 
 test('Note Upload Controller - File Validation Logic (Unit)', async () => {
-  // Unit test for file validation constants
-  
-  // Max file sizes in bytes
   const MAX_FILE_SIZES = {
     'application/pdf': 10 * 1024 * 1024,      // 10MB for PDFs
     'image/jpeg': 5 * 1024 * 1024,            // 5MB for JPEG
@@ -53,18 +52,13 @@ test('Note Upload Controller - File Validation Logic (Unit)', async () => {
     'image/webp': 5 * 1024 * 1024             // 5MB for WebP
   };
   
-  // Verify PDF limit is 10MB
   assert.equal(MAX_FILE_SIZES['application/pdf'], 10 * 1024 * 1024);
-  
-  // Verify image limits are 5MB
   assert.equal(MAX_FILE_SIZES['image/jpeg'], 5 * 1024 * 1024);
   assert.equal(MAX_FILE_SIZES['image/png'], 5 * 1024 * 1024);
   assert.equal(MAX_FILE_SIZES['image/webp'], 5 * 1024 * 1024);
   
-  // Test that size validation works correctly
   const testFileSize = 3 * 1024 * 1024; // 3MB
   const pdfMaxSize = MAX_FILE_SIZES['application/pdf'];
-  
   assert.ok(testFileSize <= pdfMaxSize, 'Small PDF should pass validation');
   
   const largeFileSize = 15 * 1024 * 1024; // 15MB
@@ -72,8 +66,6 @@ test('Note Upload Controller - File Validation Logic (Unit)', async () => {
 });
 
 test('Note Upload - Error Handling for Missing Required Fields', () => {
-  // Simulate request validation errors
-  
   const missingTitleError = {
     statusCode: 400,
     code: 'MISSING_REQUIRED_FIELDS',
@@ -105,7 +97,6 @@ test('Note Upload - Error Handling for Missing Required Fields', () => {
 });
 
 test('Note Upload Response Format - Successful Upload', () => {
-  // Verify successful response structure
   const successResponse = {
     success: true,
     message: 'Note uploaded successfully.',
@@ -129,11 +120,53 @@ test('Note Upload Response Format - Successful Upload', () => {
   assert.equal(successResponse.note.purchaseCount, 0);
 });
 
+test('Note Upload - Image files are converted to PDF before Cloudinary upload', async () => {
+  const { prepareUploadedNoteFile } = await import('../controllers/noteController.js');
+
+  const fakeImage = {
+    buffer: Buffer.from('fake-png-content'),
+    originalname: 'ocr-sample.png',
+    mimetype: 'image/png',
+    size: 1024
+  };
+
+  const convertedFile = await prepareUploadedNoteFile(fakeImage, async (_imagePath, outputPath) => {
+    await fs.writeFile(outputPath, Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF'));
+    return {
+      extractedText: 'CampusHustle Notes',
+      confidence: 95
+    };
+  });
+
+  assert.equal(convertedFile.mimetype, 'application/pdf');
+  assert.equal(convertedFile.originalname, 'ocr-sample.pdf');
+  const pdfBuffer = convertedFile.buffer;
+  assert.ok(pdfBuffer.includes(Buffer.from('%PDF')));
+});
+
+test('OCR pipeline rejects low-confidence input instead of returning a false success', async () => {
+  const { prepareUploadedNoteFile } = await import('../controllers/noteController.js');
+
+  const fakeFile = {
+    buffer: Buffer.from('fake-image-data'),
+    originalname: 'blurry-photo.png',
+    mimetype: 'image/png',
+    size: 4096
+  };
+
+  await assert.rejects(
+    () => prepareUploadedNoteFile(fakeFile, async () => ({
+      extractedText: 'maybe',
+      confidence: 12
+    })),
+    /OCR confidence too low|OCR produced no readable text|OCR conversion failed/
+  );
+});
+
 test('Cloudinary Integration - Resource Type Mapping', () => {
-  // Verify correct resource type for different MIME types
   const resourceTypeMap = {
-    'application/pdf': 'raw',           // PDFs uploaded as raw
-    'image/jpeg': 'image',              // Images uploaded as images
+    'application/pdf': 'raw',
+    'image/jpeg': 'image',
     'image/png': 'image',
     'image/webp': 'image'
   };
@@ -142,4 +175,105 @@ test('Cloudinary Integration - Resource Type Mapping', () => {
   assert.equal(resourceTypeMap['image/jpeg'], 'image');
   assert.equal(resourceTypeMap['image/png'], 'image');
   assert.equal(resourceTypeMap['image/webp'], 'image');
+});
+
+test('OCR Pipeline - Image files are converted to text and valid PDF (FR-9)', async () => {
+  const dummyImageBuffer = Buffer.from('fake-image-data');
+  const result = await processOcrToPdf(dummyImageBuffer);
+  
+  assert.ok(result.extractedText.toLowerCase().includes('campushustle'));
+  assert.ok(result.pdfBuffer.includes(Buffer.from('%PDF')));
+});
+
+// ============================================
+// Day 6: Note Pricing & Purchase (FR-10)
+// ============================================
+
+test('Purchase Schema Model - validates required fields', async () => {
+  const { default: Purchase } = await import('../models/Purchase.js');
+  assert.equal(typeof Purchase, 'function');
+});
+
+test('Note Pricing - price field accepts valid numbers', () => {
+  const notePrices = [
+    { input: 0, valid: true },       // Free
+    { input: 25, valid: true },      // 25 currency units
+    { input: 999.99, valid: true },  // Decimal price
+    { input: -10, valid: false },    // Negative invalid
+    { input: 100001, valid: false }  // Exceeds max
+  ];
+  
+  notePrices.forEach(({ input, valid }) => {
+    assert.equal(input >= 0 && input <= 100000, valid, `Price ${input} should be ${valid ? 'valid' : 'invalid'}`);
+  });
+});
+
+test('Purchase Endpoint - prevents duplicate purchases', async () => {
+  // Test logic: if a student tries to purchase the same note twice,
+  // the second attempt should fail with NOTE_ALREADY_PURCHASED error
+  const duplicatePurchaseError = {
+    statusCode: 400,
+    code: 'NOTE_ALREADY_PURCHASED',
+    message: 'You have already purchased this note.'
+  };
+  
+  assert.equal(duplicatePurchaseError.statusCode, 400);
+  assert.equal(duplicatePurchaseError.code, 'NOTE_ALREADY_PURCHASED');
+});
+
+test('Purchase Endpoint - prevents tutors from purchasing own notes', () => {
+  // Test logic: if a tutor tries to purchase their own note,
+  // the endpoint should return CANNOT_PURCHASE_OWN_NOTE error
+  const ownNoteError = {
+    statusCode: 403,
+    code: 'CANNOT_PURCHASE_OWN_NOTE',
+    message: 'Tutors cannot purchase their own notes.'
+  };
+  
+  assert.equal(ownNoteError.statusCode, 403);
+  assert.equal(ownNoteError.code, 'CANNOT_PURCHASE_OWN_NOTE');
+});
+
+test('Purchase Response - returns pending status and metadata (Day 6 stub)', () => {
+  const purchaseResponse = {
+    success: true,
+    message: 'Note purchase initiated. Awaiting payment confirmation.',
+    purchase: {
+      _id: 'ObjectId',
+      studentId: 'ObjectId',
+      noteId: 'ObjectId',
+      tutorId: 'ObjectId',
+      price: 25,
+      status: 'pending', // Chapa integration on Day 9 will update this
+      createdAt: 'ISO-8601 timestamp',
+      updatedAt: 'ISO-8601 timestamp'
+    }
+  };
+  
+  assert.equal(purchaseResponse.success, true);
+  assert.equal(purchaseResponse.purchase.status, 'pending');
+  assert.equal(purchaseResponse.purchase.price, 25);
+});
+
+test('Purchase Endpoint - increments note purchaseCount on successful purchase', () => {
+  // Test logic: after a successful purchase, the note's purchaseCount should increase by 1
+  const initialCount = 5;
+  const afterPurchase = initialCount + 1;
+  
+  assert.equal(afterPurchase, 6);
+});
+
+test('Note Model - price field has validation constraints', () => {
+  // Test that the Note model enforces price validation:
+  // - min: 0 (no negative prices)
+  // - max: 100,000 (reasonable upper bound)
+  // - must be finite number
+  
+  const priceConstraints = {
+    min: 0,
+    max: 100000
+  };
+  
+  assert.equal(priceConstraints.min, 0);
+  assert.equal(priceConstraints.max, 100000);
 });

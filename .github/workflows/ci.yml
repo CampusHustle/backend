@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   # =========================================================================
-  # 1. Continuous Integration (CI): Lint, Test & Health Verification
+  # 1. Continuous Integration (CI): Lint, Test & Server Health Check
   # =========================================================================
   ci:
     name: CI Checks (Lint, Test, Build)
@@ -30,16 +30,16 @@ jobs:
           - 27017:27017
         options: >-
           --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval 10s
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     env:
       NODE_ENV: test
       PORT: 5000
-      DATABASE_URL: mongodb://localhost:27017/campus_hustle_test
-      JWT_SECRET: ci_test_jwt_secret_key_non_production_only
-      JWT_REFRESH_SECRET: ci_test_jwt_refresh_secret_key_non_production_only
+      DATABASE_URL: mongodb://127.0.0.1:27017/campus_hustle_test
+      JWT_SECRET: ci_test_jwt_secret_key_for_testing_only
+      JWT_REFRESH_SECRET: ci_test_jwt_refresh_secret_key_for_testing_only
       EMAIL_VERIFICATION_SECRET: ci_test_email_verification_secret_key
       JWT_EXPIRES_IN: 15m
       JWT_REFRESH_EXPIRES_IN: 7d
@@ -53,7 +53,7 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js Environment (v20)
+      - name: Setup Node.js (v20)
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -72,9 +72,21 @@ jobs:
         run: |
           node index.js &
           SERVER_PID=$!
-          sleep 4
-          curl --fail --show-error -s http://localhost:5000/api/health | grep '"status":"ok"'
-          kill $SERVER_PID
+          
+          # Poll health endpoint up to 10 attempts
+          for i in {1..10}; do
+            if curl -s http://127.0.0.1:5000/api/health | grep '"status":"ok"'; then
+              echo "Server is healthy!"
+              kill $SERVER_PID
+              exit 0
+            fi
+            echo "Waiting for server to be ready (attempt $i/10)..."
+            sleep 1
+          done
+          
+          echo "Health check timed out."
+          kill $SERVER_PID || true
+          exit 1
 
   # =========================================================================
   # 2. Continuous Deployment (CD): Production Deployment (Render)
@@ -84,7 +96,6 @@ jobs:
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Trigger Render Production Deployment
