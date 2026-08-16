@@ -64,5 +64,6 @@ Thumbs.db
 /doc
 # Documentation files
 .context/day4-*.md
+.context/day7-*.md
 
 *.traineddata
