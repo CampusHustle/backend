@@ -18,6 +18,10 @@ export async function register(req, res, next) {
       throw new AppError('Email, password, name, and university must be valid strings.', 400, 'VALIDATION_ERROR');
     }
 
+    if (!university.trim()) {
+      throw new AppError('University name is required and cannot be blank.', 400, 'VALIDATION_ERROR');
+    }
+
     if (password.length < 6) {
       throw new AppError('Password must be at least 6 characters long.', 400, 'WEAK_PASSWORD');
     }
