@@ -38,11 +38,13 @@ export function generateMockEmbedding(text) {
 
   let norm = 0;
   for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
+    // Deterministic pseudo-random value seeded by hash and dimension index
     const val = Math.sin(hash + i * 13.37) * Math.cos((hash ^ i) * 0.17);
     vector[i] = val;
     norm += val * val;
   }
 
+  // L2-normalize the vector so dot product equals cosine similarity
   norm = Math.sqrt(norm) || 1;
   for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
     vector[i] = parseFloat((vector[i] / norm).toFixed(6));
@@ -57,6 +59,10 @@ export function generateMockEmbedding(text) {
  *
  * @param {string} text - Text content to embed
  * @param {Object} [options={}] - Execution options
+ * @param {string} [options.apiKey] - Override API key
+ * @param {string} [options.model] - Override model name
+ * @param {Function} [options.fetchFn] - Custom fetch for testing/mocking
+ * @param {boolean} [options.allowMockFallback=true] - Fall back to deterministic vector if API key is unset
  * @returns {Promise<Array<number>>} 768-dimensional float array
  */
 export async function generateEmbedding(text, options = {}) {
@@ -69,6 +75,7 @@ export async function generateEmbedding(text, options = {}) {
   const fetchFn = options.fetchFn || globalThis.fetch;
   const allowMockFallback = options.allowMockFallback !== undefined ? options.allowMockFallback : true;
 
+  // Use deterministic mock embedding if no API key is present in dev/test environment
   if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey === 'mock_key') {
     if (allowMockFallback) {
       return generateMockEmbedding(text);
@@ -94,6 +101,7 @@ export async function generateEmbedding(text, options = {}) {
       });
 
       if (response.status === 429) {
+        // NFR-10: Graceful degradation under free-tier rate limits
         if (retries > 0) {
           retries--;
           await new Promise((r) => setTimeout(r, 1000 * (3 - retries)));
@@ -160,6 +168,7 @@ export async function batchGenerateEmbeddings(texts, options = {}) {
     return [];
   }
 
+  // Validate each text element
   for (let i = 0; i < texts.length; i++) {
     if (typeof texts[i] !== 'string' || !texts[i].trim()) {
       throw new AppError(`Text at index ${i} must be a non-empty string.`, 400, 'INVALID_INPUT');
@@ -207,6 +216,7 @@ export async function batchGenerateEmbeddings(texts, options = {}) {
       }
 
       if (!response.ok) {
+        // Fallback to sequential generation on batch failure
         const sequentialResults = await Promise.all(
           batch.map((t) => generateEmbedding(t, options))
         );
@@ -234,6 +244,7 @@ export async function batchGenerateEmbeddings(texts, options = {}) {
       }
     } catch (err) {
       if (err instanceof AppError) throw err;
+      // Graceful fallback to sequential processing
       const sequentialResults = await Promise.all(
         batch.map((t) => generateEmbedding(t, options))
       );
@@ -266,6 +277,7 @@ export async function processAndStoreNoteChunks(noteId, tutorId, textSegments, o
     throw new AppError('No text segments provided for chunking and embedding.', 400, 'EMPTY_TEXT_SEGMENTS');
   }
 
+  // 1. Text Chunking via segmentation algorithm
   const rawChunks = processTextSegments(textSegments, {
     minChunkSize: options.minChunkSize || 0,
     maxChunkSize: options.maxChunkSize || 1500,
@@ -276,6 +288,7 @@ export async function processAndStoreNoteChunks(noteId, tutorId, textSegments, o
     throw new AppError('Document segmentation produced no readable text chunks.', 400, 'NO_CHUNKS_PRODUCED');
   }
 
+  // 2. Validate preliminary chunk structure before expensive AI embedding
   for (const chunk of rawChunks) {
     const check = validateChunk({ ...chunk, embedding: null });
     if (!check.valid) {
@@ -287,6 +300,7 @@ export async function processAndStoreNoteChunks(noteId, tutorId, textSegments, o
     }
   }
 
+  // 3. Batch Generate 768-dimensional embeddings via Gemini API
   const chunkTexts = rawChunks.map((c) => c.text);
   const embeddings = await batchGenerateEmbeddings(chunkTexts, options);
 
@@ -294,6 +308,7 @@ export async function processAndStoreNoteChunks(noteId, tutorId, textSegments, o
     throw new AppError('Mismatch between chunk count and generated embeddings count.', 500, 'EMBEDDING_COUNT_MISMATCH');
   }
 
+  // 4. Assemble NoteChunk documents with vectors and metadata
   const chunksToInsert = rawChunks.map((chunk, idx) => ({
     noteId,
     tutorId,
@@ -304,6 +319,7 @@ export async function processAndStoreNoteChunks(noteId, tutorId, textSegments, o
     embedding: embeddings[idx]
   }));
 
+  // 5. Validate final structured documents with embeddings
   for (const chunkDoc of chunksToInsert) {
     const finalCheck = validateChunk(chunkDoc);
     if (!finalCheck.valid) {
@@ -315,6 +331,7 @@ export async function processAndStoreNoteChunks(noteId, tutorId, textSegments, o
     }
   }
 
+  // 6. Bulk persist to MongoDB Atlas
   const savedChunks = await NoteChunk.insertMany(chunksToInsert);
 
   return {
