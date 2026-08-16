@@ -4,6 +4,7 @@ import { User } from '../models/User.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { isUniversityEmail } from '../utils/emailValidator.js';
+import { sendVerificationEmail } from './emailService.js';
 
 /**
  * Generates an access token and refresh token pair for a user.
@@ -88,11 +89,15 @@ export async function registerUser({ email, password, name, university, departme
 
   await newUser.save();
 
+  // Send verification email (non-blocking in dev; real SMTP in prod via emailService)
+  await sendVerificationEmail(newUser.email, verificationToken);
+
   return {
     user: newUser,
     accessToken,
     refreshToken,
-    verificationToken
+    // verificationToken returned for dev convenience — remove or gate on NODE_ENV in prod
+    ...(process.env.NODE_ENV !== 'production' && { verificationToken })
   };
 }
 
