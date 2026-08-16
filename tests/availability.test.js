@@ -1,35 +1,35 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import mongoose from 'mongoose';
-import Availability from '../models/Availability.js';
+import test from "node:test";
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import { Availability } from "../models/Availability.js";
 import {
   createAvailability,
   getTutorAvailability,
   getMyAvailability,
   updateAvailability,
   deleteAvailability,
-} from '../controllers/availabilityController.js';
+} from "../controllers/availabilityController.js";
 
-test('Availability Schema - validates required fields and valid days of week', () => {
+test("Availability Schema - validates required fields and valid days of week", () => {
   const tutorId = new mongoose.Types.ObjectId();
   const validSlot = new Availability({
     tutorId,
-    dayOfWeek: 'Monday',
-    startTime: '09:00',
-    endTime: '10:30',
+    dayOfWeek: "Monday",
+    startTime: "09:00",
+    endTime: "10:30",
   });
 
   const err = validSlot.validateSync();
   assert.equal(err, undefined);
 });
 
-test('Availability Schema - rejects invalid dayOfWeek enum', () => {
+test("Availability Schema - rejects invalid dayOfWeek enum", () => {
   const tutorId = new mongoose.Types.ObjectId();
   const invalidSlot = new Availability({
     tutorId,
-    dayOfWeek: 'Funday',
-    startTime: '09:00',
-    endTime: '10:30',
+    dayOfWeek: "Funday",
+    startTime: "09:00",
+    endTime: "10:30",
   });
 
   const err = invalidSlot.validateSync();
@@ -37,13 +37,13 @@ test('Availability Schema - rejects invalid dayOfWeek enum', () => {
   assert.ok(err.errors.dayOfWeek);
 });
 
-test('Availability Schema - rejects invalid time formats', () => {
+test("Availability Schema - rejects invalid time formats", () => {
   const tutorId = new mongoose.Types.ObjectId();
   const invalidTimeSlot = new Availability({
     tutorId,
-    dayOfWeek: 'Tuesday',
-    startTime: '9 AM',
-    endTime: '10:00',
+    dayOfWeek: "Tuesday",
+    startTime: "9 AM",
+    endTime: "10:00",
   });
 
   const err = invalidTimeSlot.validateSync();
@@ -51,13 +51,13 @@ test('Availability Schema - rejects invalid time formats', () => {
   assert.ok(err.errors.startTime);
 });
 
-test('Availability Schema - pre-validate rule rejects endTime <= startTime', () => {
+test("Availability Schema - pre-validate rule rejects endTime <= startTime", () => {
   const tutorId = new mongoose.Types.ObjectId();
   const invertedSlot = new Availability({
     tutorId,
-    dayOfWeek: 'Wednesday',
-    startTime: '14:00',
-    endTime: '13:00',
+    dayOfWeek: "Wednesday",
+    startTime: "14:00",
+    endTime: "13:00",
   });
 
   const err = invertedSlot.validateSync();
@@ -65,18 +65,18 @@ test('Availability Schema - pre-validate rule rejects endTime <= startTime', () 
   assert.ok(err.errors.endTime);
 });
 
-test('Availability Controller - export structure verification', () => {
-  assert.equal(typeof createAvailability, 'function');
-  assert.equal(typeof getTutorAvailability, 'function');
-  assert.equal(typeof getMyAvailability, 'function');
-  assert.equal(typeof updateAvailability, 'function');
-  assert.equal(typeof deleteAvailability, 'function');
+test("Availability Controller - export structure verification", () => {
+  assert.equal(typeof createAvailability, "function");
+  assert.equal(typeof getTutorAvailability, "function");
+  assert.equal(typeof getMyAvailability, "function");
+  assert.equal(typeof updateAvailability, "function");
+  assert.equal(typeof deleteAvailability, "function");
 });
 
-test('Availability Controller - createAvailability validation for missing fields', async () => {
+test("Availability Controller - createAvailability validation for missing fields", async () => {
   const req = {
     user: { _id: new mongoose.Types.ObjectId() },
-    body: { dayOfWeek: 'Monday' }, // missing startTime & endTime
+    body: { dayOfWeek: "Monday" }, // missing startTime & endTime
   };
   const res = {};
   let capturedError = null;
@@ -87,5 +87,5 @@ test('Availability Controller - createAvailability validation for missing fields
 
   assert.notEqual(capturedError, null);
   assert.equal(capturedError.statusCode, 400);
-  assert.equal(capturedError.code, 'MISSING_REQUIRED_FIELDS');
+  assert.equal(capturedError.code, "MISSING_REQUIRED_FIELDS");
 });
