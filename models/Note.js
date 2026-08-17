@@ -6,7 +6,16 @@ const NoteSchema = new Schema({
   course: { type: String, required: true },
   description: { type: String },
   fileUrl: { type: String, required: true }, 
-  price: { type: Number, default: 0 },       
+  price: {
+    type: Number,
+    default: 0,
+    min: [0, 'Price cannot be negative'],
+    max: [100000, 'Price cannot exceed 100,000'],
+    validate: {
+      validator: (value) => Number.isFinite(value),
+      message: 'Price must be a valid number'
+    }
+  },
   previewPages: { type: Number, default: 3 },
   purchaseCount: { type: Number, default: 0 }
 }, { timestamps: true });

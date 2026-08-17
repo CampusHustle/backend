@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import Note from '../models/Note.js';
+import Purchase from '../models/Purchase.js';
 import cloudinary from '../config/cloudinary.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { processOcrToPdf } from '../utils/ocrHelper.js';
@@ -176,6 +177,26 @@ export async function uploadNote(req, res, next) {
       );
     }
 
+    // Validate price if provided (Fail fast before Cloudinary upload)
+    let parsedPrice = 0;
+    if (price !== undefined && price !== null && price !== '') {
+      parsedPrice = parseFloat(price);
+      if (!Number.isFinite(parsedPrice)) {
+        throw new AppError(
+          'Price must be a valid number.',
+          400,
+          'INVALID_PRICE_FORMAT'
+        );
+      }
+      if (parsedPrice < 0 || parsedPrice > 100000) {
+        throw new AppError(
+          'Price must be between 0 and 100,000.',
+          400,
+          'PRICE_OUT_OF_RANGE'
+        );
+      }
+    }
+
     // 4. Upload to Cloudinary
     // Determine resource type based on the final processed file type
     const resourceType = processedMimeType === 'application/pdf' ? 'raw' : 'image';
@@ -216,13 +237,14 @@ export async function uploadNote(req, res, next) {
     }
 
     // 5. Save Note document to MongoDB
+
     const note = new Note({
       tutorId: req.user._id,
       title: title.trim(),
       course: course.trim(),
       description: description ? description.trim() : '',
       fileUrl: cloudinaryUploadResult.secure_url,
-      price: parseFloat(price) || 0,
+      price: parsedPrice,
       previewPages: parseInt(previewPages) || 3
     });
 
@@ -233,6 +255,120 @@ export async function uploadNote(req, res, next) {
       success: true,
       message: 'Note uploaded successfully.',
       note: savedNote
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Helper to escape regex special characters
+ */
+function escapeRegex(text) {
+  return typeof text === 'string' ? text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') : '';
+}
+
+/**
+ * Search and browse notes by course, keyword, price range, and tutor (FR-10, Spec §8.5).
+ * 
+ * Query Params:
+ *   - q / query: Search keyword in title or description
+ *   - course: Filter by course code or name
+ *   - minPrice: Minimum price
+ *   - maxPrice: Maximum price
+ *   - tutorId: Filter notes from a specific tutor
+ *   - sortBy: 'newest' | 'price_asc' | 'price_desc' | 'popular'
+ *   - page: Page number (default: 1)
+ *   - limit: Items per page (default: 20, max: 50)
+ * 
+ * @param {Express.Request} req
+ * @param {Express.Response} res
+ * @param {Function} next
+ */
+export async function searchNotes(req, res, next) {
+  try {
+    const {
+      q,
+      query: searchQuery,
+      course,
+      minPrice,
+      maxPrice,
+      tutorId,
+      sortBy = 'newest',
+      page = 1,
+      limit = 20
+    } = req.query;
+
+    const filter = {};
+    const keyword = (q || searchQuery || '').trim();
+
+    if (keyword) {
+      const escaped = escapeRegex(keyword);
+      filter.$or = [
+        { title: { $regex: escaped, $options: 'i' } },
+        { description: { $regex: escaped, $options: 'i' } },
+        { course: { $regex: escaped, $options: 'i' } }
+      ];
+    }
+
+    if (course && typeof course === 'string' && course.trim()) {
+      filter.course = { $regex: escapeRegex(course.trim()), $options: 'i' };
+    }
+
+    if (tutorId && typeof tutorId === 'string' && tutorId.trim()) {
+      filter.tutorId = tutorId.trim();
+    }
+
+    // Price range filters
+    const priceFilter = {};
+    if (minPrice !== undefined && minPrice !== '') {
+      const min = parseFloat(minPrice);
+      if (!isNaN(min) && min >= 0) {
+        priceFilter.$gte = min;
+      }
+    }
+    if (maxPrice !== undefined && maxPrice !== '') {
+      const max = parseFloat(maxPrice);
+      if (!isNaN(max) && max >= 0) {
+        priceFilter.$lte = max;
+      }
+    }
+    if (Object.keys(priceFilter).length > 0) {
+      filter.price = priceFilter;
+    }
+
+    // Sorting
+    let sortOptions = { createdAt: -1 };
+    if (sortBy === 'price_asc') {
+      sortOptions = { price: 1, createdAt: -1 };
+    } else if (sortBy === 'price_desc') {
+      sortOptions = { price: -1, createdAt: -1 };
+    } else if (sortBy === 'popular') {
+      sortOptions = { purchaseCount: -1, createdAt: -1 };
+    }
+
+    // Pagination
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (parsedPage - 1) * parsedLimit;
+
+    const [notes, total] = await Promise.all([
+      Note.find(filter)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(parsedLimit)
+        .populate('tutorId', 'name university department rating profilePicUrl')
+        .lean(),
+      Note.countDocuments(filter)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      count: notes.length,
+      total,
+      page: parsedPage,
+      totalPages: Math.ceil(total / parsedLimit) || 0,
+      notes
     });
   } catch (error) {
     next(error);
@@ -285,6 +421,101 @@ export async function getNoteById(req, res, next) {
     res.status(200).json({
       success: true,
       note
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Record a note purchase for a student.
+ * 
+ * Day 6 Stub: Creates a Purchase record with "pending" status.
+ * Chapa payment integration deferred to Day 9.
+ * 
+ * FR-10 compliance: System supports preview, pricing, and purchase of notes.
+ * 
+ * Flow:
+ *   1. Validate note exists
+ *   2. Check student has not already purchased this note
+ *   3. Create Purchase record with pending status
+ *   4. Increment note's purchaseCount
+ *   5. Return purchase record
+ * 
+ * Errors:
+ *   - 404 if note not found
+ *   - 400 if student has already purchased this note
+ *   - 400 if note price is invalid
+ *   - 403 if student tries to purchase own note
+ * 
+ * @param {Express.Request} req - Express request object
+ *   - req.params.noteId: ID of the note to purchase
+ *   - req.user: Authenticated student from requireAuth middleware
+ * @param {Express.Response} res - Express response object
+ * @param {Function} next - Express next() error handler
+ */
+export async function purchaseNote(req, res, next) {
+  try {
+    const { noteId } = req.params;
+    const studentId = req.user._id;
+
+    // 1. Validate note exists
+    const note = await Note.findById(noteId);
+    if (!note) {
+      throw new AppError('Note not found.', 404, 'NOTE_NOT_FOUND');
+    }
+
+    // 2. Prevent tutors from "purchasing" their own notes
+    if (note.tutorId.toString() === studentId.toString()) {
+      throw new AppError(
+        'Tutors cannot purchase their own notes.',
+        403,
+        'CANNOT_PURCHASE_OWN_NOTE'
+      );
+    }
+
+    // 3. Check if student has already purchased this note
+    const existingPurchase = await Purchase.findOne({
+      studentId,
+      noteId
+    });
+
+    if (existingPurchase) {
+      throw new AppError(
+        'You have already purchased this note.',
+        400,
+        'NOTE_ALREADY_PURCHASED'
+      );
+    }
+
+    // 4. Validate price
+    if (!Number.isFinite(note.price) || note.price < 0) {
+      throw new AppError(
+        'Invalid note price.',
+        400,
+        'INVALID_NOTE_PRICE'
+      );
+    }
+
+    // 5. Create Purchase record (status: pending, awaiting Chapa integration on Day 9)
+    const purchase = new Purchase({
+      studentId,
+      noteId,
+      tutorId: note.tutorId,
+      price: note.price,
+      status: 'pending'
+    });
+
+    const savedPurchase = await purchase.save();
+
+    // 6. Increment note's purchaseCount
+    await Note.findByIdAndUpdate(noteId, { $inc: { purchaseCount: 1 } });
+
+    // 7. Return purchase record
+    res.status(201).json({
+      success: true,
+      message: 'Note purchase initiated. Awaiting payment confirmation.',
+      purchase: savedPurchase
     });
   } catch (error) {
     next(error);

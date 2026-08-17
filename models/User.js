@@ -83,6 +83,15 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    blockedUsers: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User'
+        }
+      ],
+      default: []
+    },
     refreshTokenHash: {
       type: String,
       default: null,
