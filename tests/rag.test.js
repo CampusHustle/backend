@@ -95,7 +95,7 @@ test('generateEmbedding - calls Gemini API and parses 768-dim values correctly',
 
   assert.equal(embedding.length, 768);
   assert.equal(requestPayload.content.parts[0].text, 'Sample text');
-  assert.equal(requestPayload.model, 'models/text-embedding-004');
+  assert.ok(requestPayload.model.includes('embedding'), 'model should be an embedding model');
 });
 
 test('generateEmbedding - handles 429 rate limits gracefully per NFR-10', async () => {

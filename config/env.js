@@ -29,6 +29,6 @@ export const config = {
   universityEmailRegex: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.edu\.et$/i,
   // Google Gemini API credentials & configuration for RAG embeddings and Q&A
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004',
-  geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-1.5-flash'
+  geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001',
+  geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash'
 };

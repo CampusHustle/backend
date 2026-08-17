@@ -83,7 +83,8 @@ export async function generateEmbedding(text, options = {}) {
     throw new AppError('Gemini API key is not configured.', 500, 'GEMINI_CONFIG_ERROR');
   }
 
-  const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
+  const cleanModel = model.replace(/^models\//, '');
+  const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:embedContent?key=${apiKey}`;
 
   let retries = 2;
   while (retries >= 0) {
@@ -92,10 +93,11 @@ export async function generateEmbedding(text, options = {}) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: `models/${model}`,
+          model: `models/${cleanModel}`,
           content: {
             parts: [{ text: text.trim() }]
-          }
+          },
+          outputDimensionality: EMBEDDING_DIMENSION
         }),
         signal: AbortSignal.timeout(10000)
       });
@@ -187,12 +189,13 @@ export async function batchGenerateEmbeddings(texts, options = {}) {
     throw new AppError('Gemini API key is not configured.', 500, 'GEMINI_CONFIG_ERROR');
   }
 
+  const cleanModel = model.replace(/^models\//, '');
   const BATCH_SIZE = 20;
   const allEmbeddings = [];
 
   for (let i = 0; i < texts.length; i += BATCH_SIZE) {
     const batch = texts.slice(i, i + BATCH_SIZE);
-    const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchEmbedContents?key=${apiKey}`;
+    const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:batchEmbedContents?key=${apiKey}`;
 
     try {
       const response = await fetchFn(endpointUrl, {
@@ -200,8 +203,9 @@ export async function batchGenerateEmbeddings(texts, options = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           requests: batch.map((text) => ({
-            model: `models/${model}`,
-            content: { parts: [{ text: text.trim() }] }
+            model: `models/${cleanModel}`,
+            content: { parts: [{ text: text.trim() }] },
+            outputDimensionality: EMBEDDING_DIMENSION
           }))
         }),
         signal: AbortSignal.timeout(15000)
@@ -585,7 +589,8 @@ ${question.trim()}
 
 Answer:`;
 
-  const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const cleanModel = model.replace(/^models\//, '');
+  const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
 
   try {
     const response = await fetchFn(endpointUrl, {

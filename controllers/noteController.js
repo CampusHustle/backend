@@ -6,6 +6,8 @@ import Purchase from '../models/Purchase.js';
 import cloudinary from '../config/cloudinary.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { processOcrToPdf } from '../utils/ocrHelper.js';
+import { processAndStoreNoteChunks } from '../services/ragService.js';
+import { extractTextFromPdfBuffer } from '../utils/pdfExtractor.js';
 
 /**
  * Supported file types for note uploads.
@@ -82,7 +84,8 @@ export async function prepareUploadedNoteFile(file, ocrRunner = processOcrToPdf)
       buffer: convertedBuffer,
       mimetype: 'application/pdf',
       originalname: `${originalBaseName}.pdf`,
-      size: convertedBuffer.length
+      size: convertedBuffer.length,
+      extractedText
     };
   } catch (error) {
     if (error instanceof AppError) {
@@ -250,7 +253,30 @@ export async function uploadNote(req, res, next) {
 
     const savedNote = await note.save();
 
-    // 6. Return created Note
+    // 6. RAG Pipeline (FR-11): Extract text & generate chunk embeddings for AI Q&A
+    try {
+      let textSegments = [];
+      if (processedFile.extractedText && processedFile.extractedText.trim()) {
+        textSegments = [{ text: processedFile.extractedText.trim(), pageNumber: 1 }];
+      } else if (processedFile.buffer) {
+        textSegments = extractTextFromPdfBuffer(processedFile.buffer);
+      }
+
+      // If no text could be extracted from PDF streams, fallback to metadata summary
+      if (textSegments.length === 0) {
+        const fallbackText = `${title}. Course: ${course}. ${description || ''}`.trim();
+        textSegments = [{ text: fallbackText, pageNumber: 1 }];
+      }
+
+      // Process and persist chunks in background without blocking response
+      processAndStoreNoteChunks(savedNote._id, savedNote.tutorId, textSegments).catch((ragErr) => {
+        console.error('[RAG Chunking Error]', ragErr.message);
+      });
+    } catch (ragExtractErr) {
+      console.error('[RAG Extraction Error]', ragExtractErr.message);
+    }
+
+    // 7. Return created Note
     res.status(201).json({
       success: true,
       message: 'Note uploaded successfully.',
