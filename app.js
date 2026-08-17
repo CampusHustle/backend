@@ -8,6 +8,7 @@ import noteRoutes from './routes/noteRoutes.js';
 import availabilityRoutes from './routes/availabilityRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
 
 export const app = express();
 
@@ -27,6 +28,7 @@ app.use('/api/notes', noteRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/messages', messageRoutes);
 
 // Centralized error handling middleware
 app.use(errorHandler);
