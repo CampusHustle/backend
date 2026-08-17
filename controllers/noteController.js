@@ -441,19 +441,73 @@ export async function getNoteById(req, res, next) {
   try {
     const { noteId } = req.params;
 
-    const note = await Note.findById(noteId);
+    const query = Note.findById(noteId);
+    const note = (query && typeof query.populate === 'function')
+      ? await query.populate('tutorId', 'name university department rating profilePicUrl')
+      : await query;
+
     if (!note) {
       throw new AppError('Note not found.', 404, 'NOTE_NOT_FOUND');
     }
 
+    let isPurchased = false;
+    let purchaseStatus = null;
+
+    if (req.user) {
+      const purchase = await Purchase.findOne({ studentId: req.user._id, noteId: note._id });
+      if (purchase) {
+        isPurchased = true;
+        purchaseStatus = purchase.status;
+      }
+    }
+
     res.status(200).json({
       success: true,
-      note
+      note,
+      isPurchased,
+      purchaseStatus
     });
   } catch (error) {
     next(error);
   }
 }
+
+
+/**
+ * Fetch all purchase records for the authenticated user.
+ * Supports filtering by purchase status (e.g., ?status=pending, completed, failed).
+ * FR-10 compliance: Supports tracking of note purchase records.
+ *
+ * @param {Express.Request} req
+ * @param {Express.Response} res
+ * @param {Function} next
+ */
+export async function getMyPurchases(req, res, next) {
+  try {
+    const studentId = req.user._id;
+    const { status } = req.query;
+
+    const filter = { studentId };
+    if (status && ['pending', 'completed', 'failed'].includes(status.toLowerCase())) {
+      filter.status = status.toLowerCase();
+    }
+
+    const purchases = await Purchase.find(filter)
+      .sort({ createdAt: -1 })
+      .populate('noteId', 'title course description price previewPages fileUrl')
+      .populate('tutorId', 'name university department rating profilePicUrl')
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: purchases.length,
+      purchases
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 
 /**
  * Record a note purchase for a student.

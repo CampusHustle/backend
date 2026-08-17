@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import Note from '../models/Note.js';
 import Purchase from '../models/Purchase.js';
 import { processOcrToPdf } from '../utils/ocrHelper.js';
-import { prepareUploadedNoteFile, uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes } from '../controllers/noteController.js';
+import { prepareUploadedNoteFile, uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes, getMyPurchases } from '../controllers/noteController.js';
+import { optionalAuth } from '../middleware/auth.js';
 import noteRoutes from '../routes/noteRoutes.js';
 
 // ============================================================================
@@ -749,12 +750,128 @@ test('Note API Contract - verifies endpoint paths and methods (FR-9, FR-10, Spec
     { method: 'GET', path: '/api/notes/search', description: 'Search and browse notes' },
     { method: 'GET', path: '/api/notes/tutor/:tutorId', description: 'Get notes by tutor' },
     { method: 'GET', path: '/api/notes/:noteId', description: 'Get single note detail/preview' },
-    { method: 'POST', path: '/api/notes/:noteId/purchase', description: 'Purchase a note' }
+    { method: 'POST', path: '/api/notes/:noteId/purchase', description: 'Purchase a note' },
+    { method: 'GET', path: '/api/notes/purchases/me', description: 'Get user purchase records' }
   ];
 
-  assert.equal(expectedContract.length, 5);
+  assert.equal(expectedContract.length, 6);
   expectedContract.forEach(route => {
     assert.ok(route.path.startsWith('/api/notes'));
   });
 });
+
+test('getMyPurchases Controller - retrieves purchase list for authenticated user with status filtering (FR-10)', async () => {
+  const originalFind = Purchase.find;
+  try {
+    const mockPurchases = [
+      {
+        _id: 'p1',
+        studentId: 'student123',
+        noteId: { title: 'Calculus I', price: 20 },
+        tutorId: { name: 'Tutor Alex' },
+        status: 'pending',
+        createdAt: new Date()
+      }
+    ];
+
+    Purchase.find = (filter) => {
+      assert.equal(filter.studentId, 'student123');
+      assert.equal(filter.status, 'pending');
+      return {
+        sort: () => ({
+          populate: () => ({
+            populate: () => ({
+              lean: () => Promise.resolve(mockPurchases)
+            })
+          })
+        })
+      };
+    };
+
+    const req = {
+      user: { _id: 'student123' },
+      query: { status: 'pending' }
+    };
+
+    let responseStatus = null;
+    let responseData = null;
+    const res = {
+      status(code) { responseStatus = code; return this; },
+      json(data) { responseData = data; return this; }
+    };
+
+    await getMyPurchases(req, res, () => {});
+
+    assert.equal(responseStatus, 200);
+    assert.equal(responseData.success, true);
+    assert.equal(responseData.count, 1);
+    assert.equal(responseData.purchases[0].status, 'pending');
+  } finally {
+    Purchase.find = originalFind;
+  }
+});
+
+test('getNoteById Controller - populates tutor details and detects purchase status for authenticated user (FR-10)', async () => {
+  const originalFindById = Note.findById;
+  const originalFindOne = Purchase.findOne;
+  try {
+    const mockNote = {
+      _id: 'note999',
+      title: 'Physics Notes',
+      course: 'PHYS101',
+      price: 15,
+      tutorId: { _id: 'tutor555', name: 'Tutor Jane' }
+    };
+
+    Note.findById = (id) => {
+      return {
+        populate: (path, select) => {
+          assert.equal(path, 'tutorId');
+          return Promise.resolve(mockNote);
+        }
+      };
+    };
+
+    Purchase.findOne = (filter) => {
+      assert.equal(filter.studentId, 'student777');
+      assert.equal(filter.noteId, 'note999');
+      return Promise.resolve({ _id: 'pur123', status: 'pending' });
+    };
+
+    const req = {
+      params: { noteId: 'note999' },
+      user: { _id: 'student777' }
+    };
+
+    let responseStatus = null;
+    let responseData = null;
+    const res = {
+      status(code) { responseStatus = code; return this; },
+      json(data) { responseData = data; return this; }
+    };
+
+    await getNoteById(req, res, () => {});
+
+    assert.equal(responseStatus, 200);
+    assert.equal(responseData.success, true);
+    assert.equal(responseData.isPurchased, true);
+    assert.equal(responseData.purchaseStatus, 'pending');
+    assert.equal(responseData.note.tutorId.name, 'Tutor Jane');
+  } finally {
+    Note.findById = originalFindById;
+    Purchase.findOne = originalFindOne;
+  }
+});
+
+test('optionalAuth Middleware - passes through silently without error when Authorization header is absent', async () => {
+  const req = { headers: {} };
+  const res = {};
+  let nextCalled = false;
+
+  await optionalAuth(req, res, () => { nextCalled = true; });
+
+  assert.equal(nextCalled, true);
+  assert.equal(req.user, undefined);
+});
+
 
