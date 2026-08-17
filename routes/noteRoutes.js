@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, optionalAuth, requireRole } from '../middleware/auth.js';
 import { writeActionRateLimiter, generalApiRateLimiter } from '../middleware/rateLimiter.js';
-import { uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes } from '../controllers/noteController.js';
+import { uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes, getMyPurchases } from '../controllers/noteController.js';
 
 const router = Router();
 
@@ -27,6 +27,15 @@ const upload = multer({
 router.post('/', writeActionRateLimiter, requireAuth, upload.single('file'), uploadNote);
 
 /**
+ * GET /notes/purchases/me
+ * GET /notes/purchases
+ * Retrieve purchase records for the authenticated user (FR-10, Spec §8.5).
+ * Supports status filtering: ?status=pending, completed, failed
+ */
+router.get('/purchases/me', generalApiRateLimiter, requireAuth, getMyPurchases);
+router.get('/purchases', generalApiRateLimiter, requireAuth, getMyPurchases);
+
+/**
  * GET /notes/search
  * GET /notes
  * Search and browse notes across the platform by keyword, course, price, or tutor (FR-10, Spec §8.5).
@@ -44,9 +53,10 @@ router.get('/tutor/:tutorId', getNotesByTutor);
 
 /**
  * GET /notes/:noteId
- * Retrieve a single note by ID.
+ * Retrieve a single note by ID with tutor details and optional purchase state.
  */
-router.get('/:noteId', getNoteById);
+router.get('/:noteId', optionalAuth, getNoteById);
+
 
 /**
  * POST /notes/:noteId/purchase
