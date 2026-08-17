@@ -2,9 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isUniversityEmail } from '../utils/emailValidator.js';
 import * as authService from '../services/authService.js';
-import { requireRole, requireVerifiedEmail } from '../middleware/auth.js';
-
-// ─── Email Validator ─────────────────────────────────────────────────────────
+import { requireAuth, requireRole } from '../middleware/auth.js';
 
 test('Email Validator - rejects non-university emails', () => {
   assert.equal(isUniversityEmail('student@gmail.com'), false);
@@ -54,7 +52,21 @@ test('RBAC Middleware - requireRole allows access when role is permitted', () =>
   assert.equal(nextError, undefined);
 });
 
-test('RBAC Middleware - requireRole rejects unauthorized role with 403', () => {
+test('requireAuth - rejects missing or malformed bearer token with 401 (protects /api/ai/ask)', async () => {
+  const req = { headers: {} };
+  const res = {};
+  let capturedError = null;
+
+  await requireAuth(req, res, (err) => {
+    capturedError = err;
+  });
+
+  assert.notEqual(capturedError, null);
+  assert.equal(capturedError.statusCode, 401);
+  assert.equal(capturedError.code, 'UNAUTHORIZED');
+});
+
+test('RBAC Middleware - requireRole rejects unauthorized role with 403 status', () => {
   const middleware = requireRole('admin');
   const req = { user: { role: 'student' } };
   let capturedError = null;
