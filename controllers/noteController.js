@@ -262,6 +262,120 @@ export async function uploadNote(req, res, next) {
 }
 
 /**
+ * Helper to escape regex special characters
+ */
+function escapeRegex(text) {
+  return typeof text === 'string' ? text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') : '';
+}
+
+/**
+ * Search and browse notes by course, keyword, price range, and tutor (FR-10, Spec §8.5).
+ * 
+ * Query Params:
+ *   - q / query: Search keyword in title or description
+ *   - course: Filter by course code or name
+ *   - minPrice: Minimum price
+ *   - maxPrice: Maximum price
+ *   - tutorId: Filter notes from a specific tutor
+ *   - sortBy: 'newest' | 'price_asc' | 'price_desc' | 'popular'
+ *   - page: Page number (default: 1)
+ *   - limit: Items per page (default: 20, max: 50)
+ * 
+ * @param {Express.Request} req
+ * @param {Express.Response} res
+ * @param {Function} next
+ */
+export async function searchNotes(req, res, next) {
+  try {
+    const {
+      q,
+      query: searchQuery,
+      course,
+      minPrice,
+      maxPrice,
+      tutorId,
+      sortBy = 'newest',
+      page = 1,
+      limit = 20
+    } = req.query;
+
+    const filter = {};
+    const keyword = (q || searchQuery || '').trim();
+
+    if (keyword) {
+      const escaped = escapeRegex(keyword);
+      filter.$or = [
+        { title: { $regex: escaped, $options: 'i' } },
+        { description: { $regex: escaped, $options: 'i' } },
+        { course: { $regex: escaped, $options: 'i' } }
+      ];
+    }
+
+    if (course && typeof course === 'string' && course.trim()) {
+      filter.course = { $regex: escapeRegex(course.trim()), $options: 'i' };
+    }
+
+    if (tutorId && typeof tutorId === 'string' && tutorId.trim()) {
+      filter.tutorId = tutorId.trim();
+    }
+
+    // Price range filters
+    const priceFilter = {};
+    if (minPrice !== undefined && minPrice !== '') {
+      const min = parseFloat(minPrice);
+      if (!isNaN(min) && min >= 0) {
+        priceFilter.$gte = min;
+      }
+    }
+    if (maxPrice !== undefined && maxPrice !== '') {
+      const max = parseFloat(maxPrice);
+      if (!isNaN(max) && max >= 0) {
+        priceFilter.$lte = max;
+      }
+    }
+    if (Object.keys(priceFilter).length > 0) {
+      filter.price = priceFilter;
+    }
+
+    // Sorting
+    let sortOptions = { createdAt: -1 };
+    if (sortBy === 'price_asc') {
+      sortOptions = { price: 1, createdAt: -1 };
+    } else if (sortBy === 'price_desc') {
+      sortOptions = { price: -1, createdAt: -1 };
+    } else if (sortBy === 'popular') {
+      sortOptions = { purchaseCount: -1, createdAt: -1 };
+    }
+
+    // Pagination
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (parsedPage - 1) * parsedLimit;
+
+    const [notes, total] = await Promise.all([
+      Note.find(filter)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(parsedLimit)
+        .populate('tutorId', 'name university department rating profilePicUrl')
+        .lean(),
+      Note.countDocuments(filter)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      count: notes.length,
+      total,
+      page: parsedPage,
+      totalPages: Math.ceil(total / parsedLimit) || 0,
+      notes
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Fetch all notes created by a specific tutor.
  * Used for tutor profile pages to display their offerings.
  *

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import Note from '../models/Note.js';
 import Purchase from '../models/Purchase.js';
 import { processOcrToPdf } from '../utils/ocrHelper.js';
-import { prepareUploadedNoteFile, uploadNote, getNotesByTutor, getNoteById, purchaseNote } from '../controllers/noteController.js';
+import { prepareUploadedNoteFile, uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes } from '../controllers/noteController.js';
 import noteRoutes from '../routes/noteRoutes.js';
 
 // ============================================================================
@@ -680,6 +680,60 @@ test('purchaseNote Controller - creates pending purchase record and increments n
   }
 });
 
+test('searchNotes Controller - searches and returns paginated list of notes', async () => {
+  const originalFind = Note.find;
+  const originalCount = Note.countDocuments;
+  try {
+    const mockNotes = [
+      { _id: 'note1', title: 'Calculus I Notes', course: 'MATH101', price: 20 },
+      { _id: 'note2', title: 'Calculus II Summary', course: 'MATH102', price: 30 }
+    ];
+
+    Note.find = () => ({
+      sort: () => ({
+        skip: () => ({
+          limit: () => ({
+            populate: () => ({
+              lean: () => Promise.resolve(mockNotes)
+            })
+          })
+        })
+      })
+    });
+
+    Note.countDocuments = () => Promise.resolve(2);
+
+    const req = {
+      query: { q: 'calculus', page: 1, limit: 10 }
+    };
+
+    let responseStatus = null;
+    let responseData = null;
+
+    const res = {
+      status(code) {
+        responseStatus = code;
+        return this;
+      },
+      json(data) {
+        responseData = data;
+        return this;
+      }
+    };
+
+    await searchNotes(req, res, () => {});
+
+    assert.equal(responseStatus, 200);
+    assert.equal(responseData.success, true);
+    assert.equal(responseData.count, 2);
+    assert.equal(responseData.total, 2);
+    assert.equal(responseData.notes.length, 2);
+  } finally {
+    Note.find = originalFind;
+    Note.countDocuments = originalCount;
+  }
+});
+
 // ============================================================================
 // Section 4: Integration Tests — Route Middleware & Endpoint Signatures
 // ============================================================================
@@ -692,13 +746,15 @@ test('Note Routes - validates router exports and route configurations', () => {
 test('Note API Contract - verifies endpoint paths and methods (FR-9, FR-10, Spec §8.5)', () => {
   const expectedContract = [
     { method: 'POST', path: '/api/notes', description: 'Upload note (PDF/image OCR)' },
+    { method: 'GET', path: '/api/notes/search', description: 'Search and browse notes' },
     { method: 'GET', path: '/api/notes/tutor/:tutorId', description: 'Get notes by tutor' },
     { method: 'GET', path: '/api/notes/:noteId', description: 'Get single note detail/preview' },
     { method: 'POST', path: '/api/notes/:noteId/purchase', description: 'Purchase a note' }
   ];
 
-  assert.equal(expectedContract.length, 4);
+  assert.equal(expectedContract.length, 5);
   expectedContract.forEach(route => {
     assert.ok(route.path.startsWith('/api/notes'));
   });
 });
+
