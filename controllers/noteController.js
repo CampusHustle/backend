@@ -3,9 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import Note from '../models/Note.js';
 import Purchase from '../models/Purchase.js';
+import { createNotification } from '../services/notificationService.js';
+
 import cloudinary from '../config/cloudinary.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { processOcrToPdf } from '../utils/ocrHelper.js';
+import { processAndStoreNoteChunks } from '../services/ragService.js';
+import { extractTextFromPdfBuffer } from '../utils/pdfExtractor.js';
 
 /**
  * Supported file types for note uploads.
@@ -82,7 +86,8 @@ export async function prepareUploadedNoteFile(file, ocrRunner = processOcrToPdf)
       buffer: convertedBuffer,
       mimetype: 'application/pdf',
       originalname: `${originalBaseName}.pdf`,
-      size: convertedBuffer.length
+      size: convertedBuffer.length,
+      extractedText
     };
   } catch (error) {
     if (error instanceof AppError) {
@@ -250,7 +255,30 @@ export async function uploadNote(req, res, next) {
 
     const savedNote = await note.save();
 
-    // 6. Return created Note
+    // 6. RAG Pipeline (FR-11): Extract text & generate chunk embeddings for AI Q&A
+    try {
+      let textSegments = [];
+      if (processedFile.extractedText && processedFile.extractedText.trim()) {
+        textSegments = [{ text: processedFile.extractedText.trim(), pageNumber: 1 }];
+      } else if (processedFile.buffer) {
+        textSegments = extractTextFromPdfBuffer(processedFile.buffer);
+      }
+
+      // If no text could be extracted from PDF streams, fallback to metadata summary
+      if (textSegments.length === 0) {
+        const fallbackText = `${title}. Course: ${course}. ${description || ''}`.trim();
+        textSegments = [{ text: fallbackText, pageNumber: 1 }];
+      }
+
+      // Process and persist chunks in background without blocking response
+      processAndStoreNoteChunks(savedNote._id, savedNote.tutorId, textSegments).catch((ragErr) => {
+        console.error('[RAG Chunking Error]', ragErr.message);
+      });
+    } catch (ragExtractErr) {
+      console.error('[RAG Extraction Error]', ragExtractErr.message);
+    }
+
+    // 7. Return created Note
     res.status(201).json({
       success: true,
       message: 'Note uploaded successfully.',
@@ -413,19 +441,73 @@ export async function getNoteById(req, res, next) {
   try {
     const { noteId } = req.params;
 
-    const note = await Note.findById(noteId);
+    const query = Note.findById(noteId);
+    const note = (query && typeof query.populate === 'function')
+      ? await query.populate('tutorId', 'name university department rating profilePicUrl')
+      : await query;
+
     if (!note) {
       throw new AppError('Note not found.', 404, 'NOTE_NOT_FOUND');
     }
 
+    let isPurchased = false;
+    let purchaseStatus = null;
+
+    if (req.user) {
+      const purchase = await Purchase.findOne({ studentId: req.user._id, noteId: note._id });
+      if (purchase) {
+        isPurchased = true;
+        purchaseStatus = purchase.status;
+      }
+    }
+
     res.status(200).json({
       success: true,
-      note
+      note,
+      isPurchased,
+      purchaseStatus
     });
   } catch (error) {
     next(error);
   }
 }
+
+
+/**
+ * Fetch all purchase records for the authenticated user.
+ * Supports filtering by purchase status (e.g., ?status=pending, completed, failed).
+ * FR-10 compliance: Supports tracking of note purchase records.
+ *
+ * @param {Express.Request} req
+ * @param {Express.Response} res
+ * @param {Function} next
+ */
+export async function getMyPurchases(req, res, next) {
+  try {
+    const studentId = req.user._id;
+    const { status } = req.query;
+
+    const filter = { studentId };
+    if (status && ['pending', 'completed', 'failed'].includes(status.toLowerCase())) {
+      filter.status = status.toLowerCase();
+    }
+
+    const purchases = await Purchase.find(filter)
+      .sort({ createdAt: -1 })
+      .populate('noteId', 'title course description price previewPages fileUrl')
+      .populate('tutorId', 'name university department rating profilePicUrl')
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: purchases.length,
+      purchases
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 
 /**
  * Record a note purchase for a student.
@@ -511,12 +593,24 @@ export async function purchaseNote(req, res, next) {
     // 6. Increment note's purchaseCount
     await Note.findByIdAndUpdate(noteId, { $inc: { purchaseCount: 1 } });
 
-    // 7. Return purchase record
+    // 7. Trigger notification for tutor (FR-14)
+    await createNotification({
+      recipientId: note.tutorId,
+      senderId: studentId,
+      type: 'note_purchase',
+      title: 'Note Purchased',
+      message: `A student purchased your note "${note.title}".`,
+      referenceId: savedPurchase._id,
+      referenceType: 'purchase'
+    });
+
+    // 8. Return purchase record
     res.status(201).json({
       success: true,
       message: 'Note purchase initiated. Awaiting payment confirmation.',
       purchase: savedPurchase
     });
+
   } catch (error) {
     next(error);
   }

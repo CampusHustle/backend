@@ -39,6 +39,28 @@ export async function requireAuth(req, res, next) {
 }
 
 /**
+ * Express middleware to optionally authenticate requests via Bearer JWT.
+ * Attaches req.user if a valid token is provided, but continues silently if unauthenticated or token invalid.
+ */
+export async function optionalAuth(req, res, _next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, config.jwtSecret);
+      const user = await User.findById(decoded.userId);
+      if (user && !user.isBlocked) {
+        req.user = user;
+      }
+    }
+  } catch (_err) {
+    // Ignore invalid/expired tokens for optional authentication
+  }
+  _next();
+}
+
+
+/**
  * Middleware generator to enforce role-based authorization.
  * Mitigates Elevation of Privilege (STRIDE).
  * @param {...string} allowedRoles
