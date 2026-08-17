@@ -298,3 +298,86 @@ export async function searchTutors(queryParams = {}) {
     totalPages: Math.ceil(total / parsedLimit) || 0
   };
 }
+
+/**
+ * Blocks another user (FR-13).
+ * Adds target user to current user's blockedUsers list.
+ *
+ * @param {string} userId - Current user ID
+ * @param {string} targetUserId - Target user to block
+ */
+export async function blockUser(userId, targetUserId) {
+  if (!targetUserId || typeof targetUserId !== 'string') {
+    throw new AppError('targetUserId is required.', 400, 'VALIDATION_ERROR');
+  }
+
+  const userStr = userId.toString();
+  if (userStr === targetUserId) {
+    throw new AppError('You cannot block yourself.', 400, 'VALIDATION_ERROR');
+  }
+
+  const target = await User.findById(targetUserId);
+  if (!target) {
+    throw new AppError('User to block not found.', 404, 'USER_NOT_FOUND');
+  }
+
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { $addToSet: { blockedUsers: targetUserId } },
+    { new: true }
+  );
+
+  return { message: 'User blocked successfully.', blockedUsers: user.blockedUsers };
+}
+
+/**
+ * Unblocks a previously blocked user (FR-13).
+ *
+ * @param {string} userId - Current user ID
+ * @param {string} targetUserId - Target user to unblock
+ */
+export async function unblockUser(userId, targetUserId) {
+  if (!targetUserId || typeof targetUserId !== 'string') {
+    throw new AppError('targetUserId is required.', 400, 'VALIDATION_ERROR');
+  }
+
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { $pull: { blockedUsers: targetUserId } },
+    { new: true }
+  );
+
+  if (!user) {
+    throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
+  }
+
+  return { message: 'User unblocked successfully.', blockedUsers: user.blockedUsers };
+}
+
+/**
+ * Admin action to toggle account suspension (FR-13, NFR-9).
+ *
+ * @param {string} targetUserId
+ * @param {boolean} isBlocked
+ */
+export async function adminSetUserBlock(targetUserId, isBlocked) {
+  if (typeof isBlocked !== 'boolean') {
+    throw new AppError('isBlocked must be a boolean.', 400, 'VALIDATION_ERROR');
+  }
+
+  const update = { isBlocked };
+  if (isBlocked) {
+    update.refreshTokenHash = null; // Invalidate active sessions immediately
+  }
+
+  const user = await User.findByIdAndUpdate(targetUserId, update, { new: true });
+  if (!user) {
+    throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
+  }
+
+  return {
+    message: isBlocked ? 'User account suspended.' : 'User account suspension lifted.',
+    user
+  };
+}
+
