@@ -1,5 +1,6 @@
 import * as userService from '../services/userService.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { ALLOWED_SKILL_TAGS } from '../utils/skillTags.js';
 
 /**
  * Controller to fetch authenticated user's profile.
@@ -14,11 +15,18 @@ export async function getMe(req, res, next) {
 }
 
 /**
+ * Returns the canonical list of allowed skill tags (FR-3).
+ * Frontend uses this to render tag pickers without hardcoding the list.
+ */
+export async function getSkillTags(_req, res) {
+  res.status(200).json({ success: true, tags: ALLOWED_SKILL_TAGS });
+}
+
+/**
  * Controller to update authenticated user's profile.
  */
 export async function updateMe(req, res, next) {
   try {
-    // Fail fast input validation
     if (!req.body || Object.keys(req.body).length === 0) {
       throw new AppError('No update fields provided.', 400, 'VALIDATION_ERROR');
     }

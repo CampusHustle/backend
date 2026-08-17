@@ -1,5 +1,6 @@
 import { User } from '../models/User.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { ALLOWED_SKILL_TAGS } from '../utils/skillTags.js';
 
 /**
  * Escapes regex special characters to prevent ReDoS and regex query injection.
@@ -8,6 +9,39 @@ import { AppError } from '../middleware/errorHandler.js';
  */
 export function escapeRegex(text) {
   return typeof text === 'string' ? text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') : '';
+}
+
+/**
+ * Validates and normalizes skill tags against the canonical allowed list (FR-3).
+ * @param {any} tags
+ * @param {string} fieldName
+ * @returns {string[]}
+ */
+function validateSkillTagsInternal(tags, fieldName) {
+  if (!Array.isArray(tags)) {
+    throw new AppError(`${fieldName} must be an array of strings.`, 400, 'VALIDATION_ERROR');
+  }
+  if (tags.length > 15) {
+    throw new AppError(`${fieldName} cannot contain more than 15 tags.`, 400, 'VALIDATION_ERROR');
+  }
+
+  const normalized = tags.map((t) => {
+    if (typeof t !== 'string') {
+      throw new AppError(`Each tag in ${fieldName} must be a string.`, 400, 'VALIDATION_ERROR');
+    }
+    return t.trim().toLowerCase();
+  });
+
+  const invalid = normalized.filter((t) => !ALLOWED_SKILL_TAGS.includes(t));
+  if (invalid.length > 0) {
+    throw new AppError(
+      `Invalid skill tags in ${fieldName}: [${invalid.join(', ')}]. Use GET /api/users/skills to see allowed tags.`,
+      400,
+      'INVALID_SKILL_TAG'
+    );
+  }
+
+  return [...new Set(normalized)]; // deduplicate
 }
 
 /**
@@ -23,45 +57,98 @@ export async function getProfile(userId) {
 }
 
 /**
- * Updates profile fields for the authenticated user.
- * Supports updating skills, bio, department, hourly rate, and role switching.
+ * Updates profile fields for the authenticated user (FR-2, FR-3).
+ * Enforces structured skill tags, input validation, and role-switch guards.
  * @param {string} userId
  * @param {Object} updateData
  */
 export async function updateProfile(userId, updateData) {
-  const allowedFields = [
-    'name',
-    'department',
-    'year',
-    'bio',
-    'profilePicUrl',
-    'hourlyRate',
-    'skillsTeaching',
-    'skillsLearning',
-    'role'
-  ];
-
   const updates = {};
-  for (const field of allowedFields) {
-    if (updateData[field] !== undefined) {
-      updates[field] = updateData[field];
+
+  // ── Name ──────────────────────────────────────────────────────────────────
+  if (updateData.name !== undefined) {
+    if (typeof updateData.name !== 'string' || !updateData.name.trim()) {
+      throw new AppError('Name must be a non-empty string.', 400, 'VALIDATION_ERROR');
     }
+    updates.name = updateData.name.trim();
   }
 
-  // Prevent Elevation of Privilege (STRIDE): Users cannot self-assign the 'admin' role
-  if (updates.role) {
-    if (!['student', 'tutor'].includes(updates.role)) {
-      throw new AppError('Invalid role specified. Self-service updates are restricted to student or tutor roles.', 403, 'FORBIDDEN');
+  // ── Bio ───────────────────────────────────────────────────────────────────
+  if (updateData.bio !== undefined) {
+    if (typeof updateData.bio !== 'string') {
+      throw new AppError('Bio must be a string.', 400, 'VALIDATION_ERROR');
     }
+    if (updateData.bio.length > 500) {
+      throw new AppError('Bio cannot exceed 500 characters.', 400, 'VALIDATION_ERROR');
+    }
+    updates.bio = updateData.bio.trim();
   }
 
-  // Validate hourlyRate is a non-negative number if provided
-  if (updates.hourlyRate !== undefined) {
-    const rate = parseFloat(updates.hourlyRate);
+  // ── Department ────────────────────────────────────────────────────────────
+  if (updateData.department !== undefined) {
+    if (typeof updateData.department !== 'string') {
+      throw new AppError('Department must be a string.', 400, 'VALIDATION_ERROR');
+    }
+    updates.department = updateData.department.trim();
+  }
+
+  // ── Year ──────────────────────────────────────────────────────────────────
+  if (updateData.year !== undefined) {
+    const parsedYear = parseInt(updateData.year, 10);
+    if (isNaN(parsedYear) || parsedYear < 1 || parsedYear > 6) {
+      throw new AppError('Year must be a number between 1 and 6.', 400, 'VALIDATION_ERROR');
+    }
+    updates.year = parsedYear;
+  }
+
+  // ── Hourly Rate ───────────────────────────────────────────────────────────
+  if (updateData.hourlyRate !== undefined) {
+    const rate = parseFloat(updateData.hourlyRate);
     if (isNaN(rate) || rate < 0) {
       throw new AppError('Hourly rate must be a non-negative number.', 400, 'VALIDATION_ERROR');
     }
+    if (rate > 10000) {
+      throw new AppError('Hourly rate cannot exceed 10,000.', 400, 'VALIDATION_ERROR');
+    }
     updates.hourlyRate = rate;
+  }
+
+  // ── Profile Picture URL ───────────────────────────────────────────────────
+  if (updateData.profilePicUrl !== undefined) {
+    if (typeof updateData.profilePicUrl !== 'string') {
+      throw new AppError('profilePicUrl must be a string.', 400, 'VALIDATION_ERROR');
+    }
+    const trimmed = updateData.profilePicUrl.trim();
+    if (trimmed && !/^https?:\/\/.+/.test(trimmed)) {
+      throw new AppError('profilePicUrl must be a valid http/https URL.', 400, 'VALIDATION_ERROR');
+    }
+    updates.profilePicUrl = trimmed;
+  }
+
+  // ── Skill Tags (FR-3) ─────────────────────────────────────────────────────
+  if (updateData.skillsTeaching !== undefined) {
+    updates.skillsTeaching = validateSkillTagsInternal(updateData.skillsTeaching, 'skillsTeaching');
+  }
+
+  if (updateData.skillsLearning !== undefined) {
+    updates.skillsLearning = validateSkillTagsInternal(updateData.skillsLearning, 'skillsLearning');
+  }
+
+  // ── Role Switch (student ↔ tutor only — STRIDE: Elevation of Privilege) ───
+  if (updateData.role !== undefined) {
+    if (!['student', 'tutor'].includes(updateData.role)) {
+      throw new AppError(
+        'Invalid role. You may only switch between student and tutor.',
+        403,
+        'FORBIDDEN'
+      );
+    }
+    updates.role = updateData.role;
+  }
+
+  // Guard: nothing valid to update
+  if (Object.keys(updates).length === 0) {
+    throw new AppError('No valid updatable fields provided.', 400, 'VALIDATION_ERROR');
   }
 
   const updatedUser = await User.findByIdAndUpdate(userId, updates, {

@@ -5,6 +5,9 @@ import { generalApiRateLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
 
+// Public: canonical skill tags list for FR-3 tag picker (must precede /:id)
+router.get('/skills', userController.getSkillTags);
+
 // Protected profile routes for current authenticated user
 router.get('/me', requireAuth, userController.getMe);
 router.put('/me', requireAuth, userController.updateMe);
