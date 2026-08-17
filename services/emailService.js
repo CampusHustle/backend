@@ -29,6 +29,11 @@ export async function sendVerificationEmail(to, token) {
  * @param {{ to: string, subject: string, text: string }} options
  */
 async function sendEmail({ to, subject, text }) {
+  if (config.nodeEnv === 'test') {
+    // Silent no-op in test environment — CI/automated tests must not require an inbox or SMTP
+    return;
+  }
+
   if (config.nodeEnv === 'production') {
     // TODO: plug in real transporter here (e.g. Nodemailer + SMTP_HOST, SMTP_USER, SMTP_PASS env vars)
     // Example:
