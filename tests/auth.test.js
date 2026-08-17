@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isUniversityEmail } from '../utils/emailValidator.js';
 import * as authService from '../services/authService.js';
-import { requireRole } from '../middleware/auth.js';
+import { requireRole, requireVerifiedEmail } from '../middleware/auth.js';
 
 test('Email Validator - rejects non-university emails', () => {
   assert.equal(isUniversityEmail('student@gmail.com'), false);
@@ -67,4 +67,30 @@ test('RBAC Middleware - requireRole rejects unauthenticated request with 401 sta
   assert.notEqual(capturedError, null);
   assert.equal(capturedError.statusCode, 401);
   assert.equal(capturedError.code, 'UNAUTHORIZED');
+});
+
+test('RBAC Middleware - requireVerifiedEmail rejects unverified user with 403', () => {
+  const req = { user: { isEmailVerified: false } };
+  const res = {};
+  let capturedError = null;
+
+  requireVerifiedEmail(req, res, (err) => {
+    capturedError = err;
+  });
+
+  assert.notEqual(capturedError, null);
+  assert.equal(capturedError.statusCode, 403);
+  assert.equal(capturedError.code, 'EMAIL_NOT_VERIFIED');
+});
+
+test('RBAC Middleware - requireVerifiedEmail allows verified user', () => {
+  const req = { user: { isEmailVerified: true } };
+  const res = {};
+  let nextCalled = false;
+
+  requireVerifiedEmail(req, res, () => {
+    nextCalled = true;
+  });
+
+  assert.equal(nextCalled, true);
 });
