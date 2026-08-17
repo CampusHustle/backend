@@ -27,7 +27,8 @@ export const config = {
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "secret_key",
   // Ethiopian university email domain pattern (strictly ending in .edu.et)
   universityEmailRegex: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.edu\.et$/i,
-  // Google Gemini API credentials & configuration for RAG embeddings
+  // Google Gemini API credentials & configuration for RAG embeddings and Q&A
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004'
+  geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004',
+  geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-1.5-flash'
 };

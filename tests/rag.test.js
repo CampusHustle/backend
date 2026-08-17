@@ -3,13 +3,18 @@ import assert from 'node:assert/strict';
 import NoteChunk from '../models/NoteChunk.js';
 import {
   EMBEDDING_DIMENSION,
+  CANNOT_ANSWER_FALLBACK,
   generateMockEmbedding,
   generateEmbedding,
   batchGenerateEmbeddings,
   processAndStoreNoteChunks,
   getChunksByNote,
   getChunksByTutor,
-  deleteChunksByNote
+  deleteChunksByNote,
+  cosineSimilarity,
+  searchChunksBySimilarity,
+  generateGroundedAnswer,
+  askTutorAssistant
 } from '../services/ragService.js';
 import { validateChunk } from '../utils/chunkingUtils.js';
 
@@ -250,7 +255,8 @@ test('processAndStoreNoteChunks - segments multi-page note, generates 768-dim em
     const result = await processAndStoreNoteChunks(
       'note507f1f77bcf86cd799439011',
       'tutor507f1f77bcf86cd799439022',
-      textSegments
+      textSegments,
+      { apiKey: 'mock_key' }
     );
 
     assert.equal(result.success, true);
@@ -283,7 +289,84 @@ test('processAndStoreNoteChunks - segments multi-page note, generates 768-dim em
 });
 
 // ============================================================================
-// Section 4: Integration Tests — Scoped Queries & Ownership Security
+// Section 4: Unit Tests — Cosine Similarity Algorithm (Day 10)
+// ============================================================================
+
+test('cosineSimilarity - calculates exact 1.0 for identical vectors', () => {
+  const vec = generateMockEmbedding('Calculus Integrals');
+  const sim = cosineSimilarity(vec, vec);
+  assert.ok(Math.abs(sim - 1.0) < 0.0001, `Similarity ${sim} should equal 1.0`);
+});
+
+test('cosineSimilarity - calculates -1.0 for opposing vectors', () => {
+  const vecA = generateMockEmbedding('Machine Learning');
+  const vecB = vecA.map((val) => -val);
+  const sim = cosineSimilarity(vecA, vecB);
+  assert.ok(Math.abs(sim - (-1.0)) < 0.0001, `Similarity ${sim} should equal -1.0`);
+});
+
+test('cosineSimilarity - calculates 0.0 for orthogonal vectors', () => {
+  const vecA = new Array(768).fill(0);
+  const vecB = new Array(768).fill(0);
+  vecA[0] = 1;
+  vecB[1] = 1;
+  const sim = cosineSimilarity(vecA, vecB);
+  assert.equal(sim, 0);
+});
+
+test('cosineSimilarity - rejects dimension mismatch or non-array inputs', () => {
+  assert.throws(
+    () => cosineSimilarity([1, 2], [1, 2, 3]),
+    (err) => err.code === 'VECTOR_DIMENSION_MISMATCH'
+  );
+  assert.throws(
+    () => cosineSimilarity(null, [1]),
+    (err) => err.code === 'INVALID_VECTOR'
+  );
+});
+
+// ============================================================================
+// Section 5: Integration Tests — Scoped Similarity Search & TC-4 Fallback
+// ============================================================================
+
+test('searchChunksBySimilarity - enforces strict tutorId scoping (STRIDE Info Disclosure)', async () => {
+  const originalFind = NoteChunk.find;
+  try {
+    const tutorAId = 'tutor_AAA_111';
+    const tutorBId = 'tutor_BBB_222';
+
+    const targetVector = generateMockEmbedding('Data Structures Trees');
+    const mockChunksTutorA = [
+      {
+        _id: 'chunk1',
+        noteId: 'note1',
+        tutorId: tutorAId,
+        pageNumber: 1,
+        chunkIndex: 0,
+        charCount: 21,
+        text: 'Binary Search Trees',
+        embedding: targetVector
+      }
+    ];
+
+    NoteChunk.find = (query) => {
+      assert.equal(query.tutorId, tutorAId, 'Must filter strictly by queried tutorId');
+      return {
+        select: () => Promise.resolve(mockChunksTutorA)
+      };
+    };
+
+    const results = await searchChunksBySimilarity(tutorAId, targetVector);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].tutorId, tutorAId);
+    assert.ok(results[0].similarityScore > 0.9);
+  } finally {
+    NoteChunk.find = originalFind;
+  }
+});
+
+// ============================================================================
+// Section 6: Integration Tests — Scoped Queries & Ownership Security
 // ============================================================================
 
 test('getChunksByNote - retrieves chunks for a specific note ordered by chunkIndex', async () => {
@@ -314,6 +397,115 @@ test('getChunksByNote - retrieves chunks for a specific note ordered by chunkInd
   }
 });
 
+test('searchChunksBySimilarity - returns empty array when tutor has no uploaded chunks', async () => {
+  const originalFind = NoteChunk.find;
+  try {
+    NoteChunk.find = () => ({
+      select: () => Promise.resolve([])
+    });
+
+    const dummyEmbedding = generateMockEmbedding('Any question');
+    const results = await searchChunksBySimilarity('tutor_empty', dummyEmbedding);
+    assert.deepEqual(results, []);
+  } finally {
+    NoteChunk.find = originalFind;
+  }
+});
+
+test('generateGroundedAnswer - triggers explicit TC-4 fallback when 0 relevant chunks provided', async () => {
+  const result = await generateGroundedAnswer('What is the meaning of quantum entanglement?', []);
+
+  assert.equal(result.grounded, false);
+  assert.equal(result.answer, CANNOT_ANSWER_FALLBACK);
+  assert.deepEqual(result.sources, []);
+});
+
+test('generateGroundedAnswer - produces grounded answer with citations when matching chunks exist', async () => {
+  const relevantChunks = [
+    {
+      _id: 'c1',
+      noteId: 'note123',
+      pageNumber: 3,
+      chunkIndex: 1,
+      similarityScore: 0.88,
+      text: 'A red-black tree is a self-balancing binary search tree where each node has a color.'
+    }
+  ];
+
+  const result = await generateGroundedAnswer('Explain red-black trees', relevantChunks, { apiKey: 'mock_key' });
+
+  assert.equal(result.grounded, true);
+  assert.ok(result.answer.includes('Page 3'));
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].noteId, 'note123');
+  assert.equal(result.sources[0].pageNumber, 3);
+});
+
+test('askTutorAssistant - full end-to-end flow with grounded answer and fallback (FR-11, TC-4)', async () => {
+  const originalFind = NoteChunk.find;
+  try {
+    const tutorId = 'tutor_math_101';
+    const noteVector = generateMockEmbedding('Derivatives measure the instantaneous rate of change.');
+
+    NoteChunk.find = (query) => ({
+      select: () => Promise.resolve([
+        {
+          _id: 'chunk_calc',
+          noteId: 'note_calc',
+          tutorId: tutorId,
+          pageNumber: 2,
+          chunkIndex: 0,
+          charCount: 52,
+          text: 'Derivatives measure the instantaneous rate of change.',
+          embedding: noteVector
+        }
+      ])
+    });
+
+    // Deterministic mock of the Gemini API so the flow never depends on live keys (NFR-10).
+    // Embedding endpoint returns the exact note vector (query then matches at similarity 1.0);
+    // generation endpoint returns a grounded answer.
+    const fetchFn = async (url) => {
+      if (url.includes(':embedContent') || url.includes(':batchEmbedContents')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ embedding: { values: noteVector } })
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: 'Derivatives measure the instantaneous rate of change.' }] } }]
+        })
+      };
+    };
+
+    // 1. Related question -> grounded answer
+    const relatedResult = await askTutorAssistant(tutorId, 'What do derivatives measure?', {
+      apiKey: 'test-gemini-key',
+      fetchFn
+    });
+    assert.equal(relatedResult.success, true);
+    assert.equal(relatedResult.grounded, true);
+    assert.ok(relatedResult.sources.length > 0);
+
+    // 2. Unrelated question with no matching content (mocking no match) -> TC-4 fallback
+    NoteChunk.find = () => ({ select: () => Promise.resolve([]) });
+    const unrelatedResult = await askTutorAssistant(tutorId, 'What is the recipe for chocolate cake?', {
+      apiKey: 'test-gemini-key',
+      fetchFn
+    });
+    assert.equal(unrelatedResult.success, true);
+    assert.equal(unrelatedResult.grounded, false);
+    assert.equal(unrelatedResult.answer, CANNOT_ANSWER_FALLBACK);
+    assert.equal(unrelatedResult.sources.length, 0);
+  } finally {
+    NoteChunk.find = originalFind;
+  }
+});
+
 test('getChunksByTutor - retrieves tutor-scoped chunks for AI Q&A (FR-11, UC-10)', async () => {
   const originalFind = NoteChunk.find;
   try {
@@ -336,6 +528,24 @@ test('getChunksByTutor - retrieves tutor-scoped chunks for AI Q&A (FR-11, UC-10)
   } finally {
     NoteChunk.find = originalFind;
   }
+});
+
+test('askTutorAssistant - validates input question constraints', async () => {
+  await assert.rejects(
+    () => askTutorAssistant(null, 'Valid question?'),
+    (err) => err.code === 'MISSING_REQUIRED_FIELDS'
+  );
+
+  await assert.rejects(
+    () => askTutorAssistant('tutor123', 'hi'), // < 3 chars
+    (err) => err.code === 'QUESTION_TOO_SHORT'
+  );
+
+  const hugeQuestion = 'q'.repeat(1005);
+  await assert.rejects(
+    () => askTutorAssistant('tutor123', hugeQuestion), // > 1000 chars
+    (err) => err.code === 'QUESTION_TOO_LONG'
+  );
 });
 
 test('deleteChunksByNote - enforces tutor ownership on deletion (STRIDE Tampering/Elevation of Privilege)', async () => {
