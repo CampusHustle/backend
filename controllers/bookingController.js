@@ -1,6 +1,7 @@
 import { Booking } from '../models/Booking.js';
 import { Availability } from '../models/Availability.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { createNotification } from '../services/notificationService.js';
 
 /**
  * @desc Request a new booking for an open availability slot
@@ -49,6 +50,17 @@ export const createBooking = async (req, res, next) => {
     });
 
     await newBooking.save();
+
+    // Trigger notification for tutor (FR-14)
+    await createNotification({
+      recipientId: slot.tutorId,
+      senderId: studentId,
+      type: 'booking_request',
+      title: 'New Booking Request',
+      message: 'A student requested a tutoring session.',
+      referenceId: newBooking._id,
+      referenceType: 'booking'
+    });
 
     res.status(201).json({
       success: true,
@@ -135,6 +147,28 @@ export const updateBookingStatus = async (req, res, next) => {
     booking.status = status;
     await booking.save();
 
+    // Trigger notification for the other participant (FR-14)
+    const recipientId = isStudent ? booking.tutorId : booking.studentId;
+    const notificationTypeMap = {
+      confirmed: { type: 'booking_accepted', title: 'Booking Confirmed', message: 'Your tutoring session booking has been confirmed.' },
+      declined: { type: 'booking_declined', title: 'Booking Declined', message: 'Your tutoring session booking request was declined.' },
+      cancelled: { type: 'booking_cancelled', title: 'Booking Cancelled', message: 'A tutoring session booking has been cancelled.' },
+      completed: { type: 'booking_completed', title: 'Booking Completed', message: 'Your tutoring session has been marked as completed.' }
+    };
+
+    const notifInfo = notificationTypeMap[status];
+    if (notifInfo) {
+      await createNotification({
+        recipientId,
+        senderId: userId,
+        type: notifInfo.type,
+        title: notifInfo.title,
+        message: notifInfo.message,
+        referenceId: booking._id,
+        referenceType: 'booking'
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: `Booking status updated to '${status}'.`,
@@ -144,6 +178,7 @@ export const updateBookingStatus = async (req, res, next) => {
     next(error);
   }
 };
+
 
 /**
  * @desc Get all bookings for the logged-in user (as student or tutor)

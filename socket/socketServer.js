@@ -4,6 +4,8 @@ import { User } from '../models/User.js';
 import { Booking } from '../models/Booking.js';
 import { Message } from '../models/Message.js';
 import { containsContactInfo } from '../utils/contactInfoDetector.js';
+import { createNotification } from '../services/notificationService.js';
+
 
 /**
  * Builds a deterministic conversationId from two user IDs.
@@ -187,6 +189,19 @@ export function initSocketServer(io) {
 
         // Broadcast to all sockets in the room (including sender for confirmation)
         io.to(conversationId).emit('message:receive', payload);
+
+        // FR-14: Trigger notification for message recipient
+        const snippet = content.trim().length > 50 ? `${content.trim().substring(0, 47)}...` : content.trim();
+        await createNotification({
+          recipientId: otherId,
+          senderId: userId,
+          type: 'new_message',
+          title: 'New Message',
+          message: snippet,
+          referenceId: message._id,
+          referenceType: 'message'
+        });
+
       } catch (err) {
         console.error('[Socket] message:send error:', err.message);
         socket.emit('error', { code: 'SERVER_ERROR', message: 'Failed to send message.' });

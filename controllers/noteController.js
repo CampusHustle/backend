@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import Note from '../models/Note.js';
 import Purchase from '../models/Purchase.js';
+import { createNotification } from '../services/notificationService.js';
+
 import cloudinary from '../config/cloudinary.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { processOcrToPdf } from '../utils/ocrHelper.js';
@@ -537,12 +539,24 @@ export async function purchaseNote(req, res, next) {
     // 6. Increment note's purchaseCount
     await Note.findByIdAndUpdate(noteId, { $inc: { purchaseCount: 1 } });
 
-    // 7. Return purchase record
+    // 7. Trigger notification for tutor (FR-14)
+    await createNotification({
+      recipientId: note.tutorId,
+      senderId: studentId,
+      type: 'note_purchase',
+      title: 'Note Purchased',
+      message: `A student purchased your note "${note.title}".`,
+      referenceId: savedPurchase._id,
+      referenceType: 'purchase'
+    });
+
+    // 8. Return purchase record
     res.status(201).json({
       success: true,
       message: 'Note purchase initiated. Awaiting payment confirmation.',
       purchase: savedPurchase
     });
+
   } catch (error) {
     next(error);
   }
