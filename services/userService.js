@@ -1,6 +1,6 @@
 import { User } from '../models/User.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { ALLOWED_SKILL_TAGS } from '../utils/skillTags.js';
+import { ALLOWED_SKILL_TAGS, validateSkillTags } from '../utils/skillTags.js';
 
 /**
  * Escapes regex special characters to prevent ReDoS and regex query injection.
@@ -9,39 +9,6 @@ import { ALLOWED_SKILL_TAGS } from '../utils/skillTags.js';
  */
 export function escapeRegex(text) {
   return typeof text === 'string' ? text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') : '';
-}
-
-/**
- * Validates and normalizes skill tags against the canonical allowed list (FR-3).
- * @param {any} tags
- * @param {string} fieldName
- * @returns {string[]}
- */
-function validateSkillTagsInternal(tags, fieldName) {
-  if (!Array.isArray(tags)) {
-    throw new AppError(`${fieldName} must be an array of strings.`, 400, 'VALIDATION_ERROR');
-  }
-  if (tags.length > 15) {
-    throw new AppError(`${fieldName} cannot contain more than 15 tags.`, 400, 'VALIDATION_ERROR');
-  }
-
-  const normalized = tags.map((t) => {
-    if (typeof t !== 'string') {
-      throw new AppError(`Each tag in ${fieldName} must be a string.`, 400, 'VALIDATION_ERROR');
-    }
-    return t.trim().toLowerCase();
-  });
-
-  const invalid = normalized.filter((t) => !ALLOWED_SKILL_TAGS.includes(t));
-  if (invalid.length > 0) {
-    throw new AppError(
-      `Invalid skill tags in ${fieldName}: [${invalid.join(', ')}]. Use GET /api/users/skills to see allowed tags.`,
-      400,
-      'INVALID_SKILL_TAG'
-    );
-  }
-
-  return [...new Set(normalized)]; // deduplicate
 }
 
 /**
@@ -85,10 +52,7 @@ export async function updateProfile(userId, updateData) {
   }
 
   // ── University ───────────────────────────────────────────────────────────
-  if (updateData.university !== undefined) {
-    if (typeof updateData.university !== 'string' || !updateData.university.trim()) {
-      throw new AppError('University must be a non-empty string.', 400, 'VALIDATION_ERROR');
-    }
+  if (updateData.university !== undefined && typeof updateData.university === 'string' && updateData.university.trim()) {
     updates.university = updateData.university.trim();
   }
 
@@ -146,6 +110,13 @@ export async function updateProfile(userId, updateData) {
     updates.profilePicUrl = trimmed;
   }
 
+  // ── Availability ──────────────────────────────────────────────────────────
+  if (updateData.availability !== undefined) {
+    if (Array.isArray(updateData.availability)) {
+      updates.availability = updateData.availability.filter((a) => typeof a === 'string');
+    }
+  }
+
   // ── Profile Complete Flag ─────────────────────────────────────────────────
   if (updateData.isProfileComplete !== undefined) {
     updates.isProfileComplete = Boolean(updateData.isProfileComplete);
@@ -153,11 +124,11 @@ export async function updateProfile(userId, updateData) {
 
   // ── Skill Tags (FR-3) ─────────────────────────────────────────────────────
   if (updateData.skillsTeaching !== undefined) {
-    updates.skillsTeaching = validateSkillTagsInternal(updateData.skillsTeaching, 'skillsTeaching');
+    updates.skillsTeaching = validateSkillTags(updateData.skillsTeaching, 'skillsTeaching', AppError);
   }
 
   if (updateData.skillsLearning !== undefined) {
-    updates.skillsLearning = validateSkillTagsInternal(updateData.skillsLearning, 'skillsLearning');
+    updates.skillsLearning = validateSkillTags(updateData.skillsLearning, 'skillsLearning', AppError);
   }
 
   // ── Role Switch (student ↔ tutor only — STRIDE: Elevation of Privilege) ───

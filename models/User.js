@@ -60,6 +60,10 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: []
     },
+    availability: {
+      type: [String],
+      default: []
+    },
     rating: {
       knowledge: { type: Number, default: 0 },
       communication: { type: Number, default: 0 },

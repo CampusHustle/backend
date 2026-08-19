@@ -704,3 +704,80 @@ export async function askTutorAssistant(tutorId, question, options = {}) {
     matchedChunksCount: matchingChunks.length
   };
 }
+
+/**
+ * Generates an academic response directly using Google Gemini for general study questions.
+ *
+ * @param {string} question - Student academic question
+ * @param {Object} [options={}] - Options (model, apiKey, fetchFn)
+ * @returns {Promise<{ grounded: boolean, answer: string, sources: Array }>}
+ */
+export async function generateGeneralAiAnswer(question, options = {}) {
+  if (!question || typeof question !== 'string' || !question.trim()) {
+    throw new AppError('Question must be a non-empty string.', 400, 'INVALID_INPUT');
+  }
+
+  const apiKey = options.apiKey || config.geminiApiKey;
+  const model = options.model || config.geminiChatModel || 'gemini-1.5-flash';
+  const fetchFn = options.fetchFn || globalThis.fetch;
+
+  if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey === 'mock_key') {
+    return {
+      grounded: true,
+      answer: `Hello! I'm Felat (ፈላጥ), your CampusHustle AI Study Assistant. Here is guidance for "${question.trim()}": When studying this topic, break it down into fundamental definitions, core formulas, practical examples, and past exam questions.`,
+      sources: []
+    };
+  }
+
+  const systemInstruction = `You are Felat (ፈላጥ), the official AI Study Assistant for CampusHustle (Ethiopia's premier university peer-learning platform).
+You help university students learn and master academic topics across Mathematics, Computer Science, Engineering, Economics, Medicine, Business, Physics, Chemistry, and more.
+Format your responses with clear markdown, bullet points, and high-yield study takeaways when appropriate. Be concise, encouraging, and accurate.`;
+
+  const cleanModel = model.replace(/^models\//, '');
+  const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
+
+  try {
+    const response = await fetchFn(endpointUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${systemInstruction}\n\nStudent Question: ${question.trim()}` }]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1000
+        }
+      }),
+      signal: AbortSignal.timeout(15000)
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new AppError(
+        `Gemini API error (${response.status}): ${errorBody || response.statusText}`,
+        response.status === 429 ? 429 : 502,
+        response.status === 429 ? 'GEMINI_RATE_LIMITED' : 'GEMINI_API_ERROR'
+      );
+    }
+
+    const data = await response.json();
+    const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    return {
+      grounded: true,
+      answer: candidateText?.trim() || "I couldn't formulate a response. Please try rephrasing your question.",
+      sources: []
+    };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError(
+      `Failed to generate AI response: ${err.message}`,
+      500,
+      'GEMINI_GENERATION_FAILED'
+    );
+  }
+}

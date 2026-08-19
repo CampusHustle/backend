@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { config } from '../config/env.js';
 
 /**
  * Factory function to create custom rate limiters per route.
@@ -9,9 +10,10 @@ import rateLimit from 'express-rate-limit';
  * @param {string} [options.message='Too many requests'] - Custom error message
  */
 export function createRateLimiter({ windowMs = 15 * 60 * 1000, limit = 100, message = 'Too many requests. Please try again later.' } = {}) {
+  const isDev = config.nodeEnv !== 'production';
   return rateLimit({
     windowMs,
-    limit,
+    limit: isDev ? 10000 : limit,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: {
