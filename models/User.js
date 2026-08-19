@@ -70,6 +70,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    isProfileComplete: {
+      type: Boolean,
+      default: false
+    },
     emailVerificationTokenHash: {
       type: String,
       default: null,
