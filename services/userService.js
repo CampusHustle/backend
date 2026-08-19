@@ -84,6 +84,14 @@ export async function updateProfile(userId, updateData) {
     updates.bio = updateData.bio.trim();
   }
 
+  // ── University ───────────────────────────────────────────────────────────
+  if (updateData.university !== undefined) {
+    if (typeof updateData.university !== 'string' || !updateData.university.trim()) {
+      throw new AppError('University must be a non-empty string.', 400, 'VALIDATION_ERROR');
+    }
+    updates.university = updateData.university.trim();
+  }
+
   // ── Department ────────────────────────────────────────────────────────────
   if (updateData.department !== undefined) {
     if (typeof updateData.department !== 'string') {
@@ -94,9 +102,22 @@ export async function updateProfile(userId, updateData) {
 
   // ── Year ──────────────────────────────────────────────────────────────────
   if (updateData.year !== undefined) {
-    const parsedYear = parseInt(updateData.year, 10);
+    const yearMap = {
+      freshman: 1,
+      sophomore: 2,
+      junior: 3,
+      senior: 4,
+      '5th year': 5,
+      grad: 5,
+      graduate: 5,
+      postgrad: 6,
+    };
+    let parsedYear = typeof updateData.year === 'string' && yearMap[updateData.year.toLowerCase()]
+      ? yearMap[updateData.year.toLowerCase()]
+      : parseInt(updateData.year, 10);
+
     if (isNaN(parsedYear) || parsedYear < 1 || parsedYear > 6) {
-      throw new AppError('Year must be a number between 1 and 6.', 400, 'VALIDATION_ERROR');
+      throw new AppError('Year must be a number between 1 and 6 or valid class standing.', 400, 'VALIDATION_ERROR');
     }
     updates.year = parsedYear;
   }
@@ -123,6 +144,11 @@ export async function updateProfile(userId, updateData) {
       throw new AppError('profilePicUrl must be a valid http/https URL.', 400, 'VALIDATION_ERROR');
     }
     updates.profilePicUrl = trimmed;
+  }
+
+  // ── Profile Complete Flag ─────────────────────────────────────────────────
+  if (updateData.isProfileComplete !== undefined) {
+    updates.isProfileComplete = Boolean(updateData.isProfileComplete);
   }
 
   // ── Skill Tags (FR-3) ─────────────────────────────────────────────────────
