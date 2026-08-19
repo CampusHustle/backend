@@ -250,6 +250,21 @@ export async function searchTutors(queryParams = {}) {
     ];
   }
 
+  // General search query matching across name, department, bio, and subjects
+  const generalQuery = queryParams.q || queryParams.query;
+  if (generalQuery && typeof generalQuery === 'string' && generalQuery.trim()) {
+    const escaped = escapeRegex(generalQuery.trim());
+    query.$and = query.$and || [];
+    query.$and.push({
+      $or: [
+        { name: { $regex: escaped, $options: 'i' } },
+        { department: { $regex: escaped, $options: 'i' } },
+        { skillsTeaching: { $regex: escaped, $options: 'i' } },
+        { bio: { $regex: escaped, $options: 'i' } }
+      ]
+    });
+  }
+
   // Subject / Skill filter (exact tag or case-insensitive partial match)
   if (subject && typeof subject === 'string' && subject.trim()) {
     query.skillsTeaching = { $regex: escapeRegex(subject.trim()), $options: 'i' };
