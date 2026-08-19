@@ -10,14 +10,52 @@ import { createNotification } from '../services/notificationService.js';
  */
 export const createBooking = async (req, res, next) => {
   try {
-    const { availabilityId } = req.body;
+    const { availabilityId, tutorId, dayOfWeek, startTime, endTime, day, time } = req.body;
     const studentId = req.user._id;
 
-    if (!availabilityId) {
-      throw new AppError('availabilityId is required.', 400, 'MISSING_REQUIRED_FIELDS');
-    }
+    let slot;
+    if (availabilityId) {
+      slot = await Availability.findById(availabilityId);
+    } else if (tutorId) {
+      const dayMap = {
+        Mon: 'Monday',
+        Tue: 'Tuesday',
+        Wed: 'Wednesday',
+        Thu: 'Thursday',
+        Fri: 'Friday',
+        Sat: 'Saturday',
+        Sun: 'Sunday',
+      };
+      const rawDay = dayOfWeek || day || 'Monday';
+      const selectedDay = dayMap[rawDay] || rawDay;
 
-    const slot = await Availability.findById(availabilityId);
+      const convertTime = (t) => {
+        if (!t) return '09:00';
+        if (/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(t)) return t;
+        const match = t.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+        if (match) {
+          let h = parseInt(match[1], 10);
+          const m = match[2];
+          const ampm = match[3]?.toUpperCase();
+          if (ampm === 'PM' && h < 12) h += 12;
+          if (ampm === 'AM' && h === 12) h = 0;
+          return `${String(h).padStart(2, '0')}:${m}`;
+        }
+        return '09:00';
+      };
+
+      const sTime = startTime ? convertTime(startTime) : (time ? convertTime(time) : '09:00');
+      const [sh, sm] = sTime.split(':').map(Number);
+      const eTime = endTime ? convertTime(endTime) : `${String((sh + 1) % 24).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+
+      slot = await Availability.findOne({ tutorId, dayOfWeek: selectedDay, startTime: sTime });
+      if (!slot) {
+        slot = new Availability({ tutorId, dayOfWeek: selectedDay, startTime: sTime, endTime: eTime, isBooked: false });
+        await slot.save();
+      }
+    } else {
+      throw new AppError('availabilityId or tutorId is required.', 400, 'MISSING_REQUIRED_FIELDS');
+    }
 
     if (!slot) {
       throw new AppError('Availability slot not found.', 404, 'NOT_FOUND');
