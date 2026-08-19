@@ -140,8 +140,8 @@ export async function updateProfile(userId, updateData) {
       throw new AppError('profilePicUrl must be a string.', 400, 'VALIDATION_ERROR');
     }
     const trimmed = updateData.profilePicUrl.trim();
-    if (trimmed && !/^https?:\/\/.+/.test(trimmed)) {
-      throw new AppError('profilePicUrl must be a valid http/https URL.', 400, 'VALIDATION_ERROR');
+    if (trimmed && !/^https?:\/\/.+/.test(trimmed) && !trimmed.startsWith('data:image/')) {
+      throw new AppError('profilePicUrl must be a valid http/https URL or image data.', 400, 'VALIDATION_ERROR');
     }
     updates.profilePicUrl = trimmed;
   }
