@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { User } from '../models/User.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { ALLOWED_SKILL_TAGS, validateSkillTags } from '../utils/skillTags.js';
@@ -165,11 +166,15 @@ export async function updateProfile(userId, updateData) {
  * @param {string} targetUserId
  */
 export async function getPublicProfile(targetUserId) {
-  if (typeof targetUserId !== 'string') {
+  if (typeof targetUserId !== 'string' || !targetUserId.trim()) {
     throw new AppError('Invalid user ID format.', 400, 'VALIDATION_ERROR');
   }
 
-  const user = await User.findById(targetUserId);
+  let user = null;
+  if (Types.ObjectId.isValid(targetUserId)) {
+    user = await User.findById(targetUserId);
+  }
+
   if (!user || user.isBlocked) {
     throw new AppError('Tutor or user profile not found.', 404, 'USER_NOT_FOUND');
   }
