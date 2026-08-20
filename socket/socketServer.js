@@ -113,17 +113,6 @@ export function initSocketServer(io) {
         return socket.emit('error', { code: 'FORBIDDEN', message: 'You are not a participant in this conversation.' });
       }
 
-      const otherId = userId === idA ? idB : idA;
-
-      // Chat requires a confirmed booking (FR-7)
-      const canChat = await hasConfirmedBooking(userId, otherId);
-      if (!canChat) {
-        return socket.emit('error', {
-          code: 'BOOKING_REQUIRED',
-          message: 'Chat is only available after a booking has been confirmed.'
-        });
-      }
-
       socket.join(conversationId);
       socket.emit('joined_conversation', { conversationId });
     });
@@ -157,15 +146,6 @@ export function initSocketServer(io) {
         }
 
         const otherId = userId === idA ? idB : idA;
-
-        // Re-verify confirmed booking on every message (booking could be cancelled mid-chat)
-        const canChat = await hasConfirmedBooking(userId, otherId);
-        if (!canChat) {
-          return socket.emit('error', {
-            code: 'BOOKING_REQUIRED',
-            message: 'Chat requires an active confirmed booking.'
-          });
-        }
 
         // FR-8: Detect and flag contact info (audit trail for admin, NFR-9)
         const hasContactInfo = containsContactInfo(content);
