@@ -34,6 +34,16 @@ const userSchema = new mongoose.Schema(
       default: '',
       trim: true
     },
+    gender: {
+      type: String,
+      enum: {
+        values: ['male', 'female'],
+        message: 'Gender must be either male or female'
+      },
+      default: null,
+      lowercase: true,
+      trim: true
+    },
     year: {
       type: Number,
       default: 1
@@ -99,6 +109,10 @@ const userSchema = new mongoose.Schema(
         }
       ],
       default: []
+    },
+    lastActiveAt: {
+      type: Date,
+      default: Date.now
     },
     refreshTokenHash: {
       type: String,

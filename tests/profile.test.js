@@ -124,17 +124,27 @@ test('updateProfile - rejects admin role self-assignment', async () => {
   );
 });
 
-test('updateProfile - rejects invalid skill tags (FR-3)', async () => {
+test('updateProfile - rejects malformed or destructive skill tags (FR-3)', async () => {
   await assert.rejects(
     () => userService.updateProfile('507f1f77bcf86cd799439011', {
-      skillsTeaching: ['cooking', 'surfing']
+      skillsTeaching: ['<script>bad()</script>', '!!!']
     }),
     (err) => {
       assert.equal(err.code, 'INVALID_SKILL_TAG');
-      assert.ok(err.message.includes('cooking'));
       return true;
     }
   );
+});
+
+test('updateProfile - accepts shorthand aliases math, eng, psych, chess', async () => {
+  try {
+    await userService.updateProfile('507f1f77bcf86cd799439011', {
+      skillsTeaching: ['math', 'eng', 'psych', 'chess']
+    });
+  } catch (err) {
+    assert.notEqual(err.code, 'INVALID_SKILL_TAG');
+    assert.notEqual(err.code, 'VALIDATION_ERROR');
+  }
 });
 
 test('updateProfile - rejects skillsTeaching that is not an array (FR-3)', async () => {
@@ -176,3 +186,35 @@ test('updateProfile - accepts valid skill tags and deduplicates (FR-3)', async (
     assert.notEqual(err.code, 'VALIDATION_ERROR');
   }
 });
+
+test('updateProfile - rejects invalid gender values', async () => {
+  await assert.rejects(
+    () => userService.updateProfile('507f1f77bcf86cd799439011', {
+      gender: 'other'
+    }),
+    (err) => {
+      assert.equal(err.code, 'VALIDATION_ERROR');
+      assert.ok(err.message.includes('Gender'));
+      return true;
+    }
+  );
+});
+
+test('updateProfile - accepts male and female gender', async () => {
+  try {
+    await userService.updateProfile('507f1f77bcf86cd799439011', {
+      gender: 'male'
+    });
+  } catch (err) {
+    assert.notEqual(err.code, 'VALIDATION_ERROR');
+  }
+
+  try {
+    await userService.updateProfile('507f1f77bcf86cd799439011', {
+      gender: 'female'
+    });
+  } catch (err) {
+    assert.notEqual(err.code, 'VALIDATION_ERROR');
+  }
+});
+
