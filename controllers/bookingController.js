@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Booking } from '../models/Booking.js';
 import { Availability } from '../models/Availability.js';
 import { AppError } from '../middleware/errorHandler.js';
@@ -14,9 +15,14 @@ export const createBooking = async (req, res, next) => {
     const studentId = req.user._id;
 
     let slot;
-    if (availabilityId) {
+    if (availabilityId && mongoose.Types.ObjectId.isValid(availabilityId)) {
       slot = await Availability.findById(availabilityId);
-    } else if (tutorId) {
+    }
+
+    if (!slot && tutorId) {
+      if (!mongoose.Types.ObjectId.isValid(tutorId)) {
+        throw new AppError('Valid tutorId is required.', 400, 'INVALID_TUTOR_ID');
+      }
       const dayMap = {
         Mon: 'Monday',
         Tue: 'Tuesday',
@@ -53,7 +59,7 @@ export const createBooking = async (req, res, next) => {
         slot = new Availability({ tutorId, dayOfWeek: selectedDay, startTime: sTime, endTime: eTime, isBooked: false });
         await slot.save();
       }
-    } else {
+    } else if (!slot) {
       throw new AppError('availabilityId or tutorId is required.', 400, 'MISSING_REQUIRED_FIELDS');
     }
 
@@ -72,7 +78,7 @@ export const createBooking = async (req, res, next) => {
     // Check if student already has a pending or confirmed booking for this slot
     const existingBooking = await Booking.findOne({
       studentId,
-      availabilityId,
+      availabilityId: slot._id,
       status: { $in: ['pending', 'confirmed'] },
     });
 
@@ -88,6 +94,7 @@ export const createBooking = async (req, res, next) => {
     });
 
     await newBooking.save();
+    console.log(`[BookingCreated] ID: ${newBooking._id}, Student: ${studentId}, Tutor: ${slot.tutorId}, Availability: ${slot._id}`);
 
     // Trigger notification for tutor (FR-14)
     await createNotification({
@@ -121,7 +128,7 @@ export const updateBookingStatus = async (req, res, next) => {
     const { status } = req.body;
     const userId = req.user._id;
 
-    const validStatuses = ['confirmed', 'declined', 'cancelled', 'completed'];
+    const validStatuses = ['pending', 'confirmed', 'declined', 'cancelled', 'completed'];
     if (!status || !validStatuses.includes(status)) {
       throw new AppError(
         `Invalid status transition value. Allowed statuses: ${validStatuses.join(', ')}.`,
@@ -164,6 +171,8 @@ export const updateBookingStatus = async (req, res, next) => {
         if (!isTutor) {
           throw new AppError('Forbidden. Only the tutor can decline a booking request.', 403, 'FORBIDDEN');
         }
+        // Free up availability slot on decline
+        await Availability.findByIdAndUpdate(booking.availabilityId, { isBooked: false });
       } else if (status === 'cancelled') {
         // Both student and tutor can cancel a pending booking
       } else if (status === 'completed') {
@@ -226,12 +235,12 @@ export const updateBookingStatus = async (req, res, next) => {
 export const getUserBookings = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { status, role } = req.query;
+    const { status, role, type } = req.query;
 
     let filter = {};
-    if (role === 'student') {
+    if (role === 'student' || type === 'outgoing') {
       filter.studentId = userId;
-    } else if (role === 'tutor') {
+    } else if (role === 'tutor' || type === 'incoming') {
       filter.tutorId = userId;
     } else {
       filter.$or = [{ studentId: userId }, { tutorId: userId }];

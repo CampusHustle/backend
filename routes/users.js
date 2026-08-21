@@ -11,6 +11,7 @@ router.get('/skills', userController.getSkillTags);
 // Protected profile routes for current authenticated user
 router.get('/me', requireAuth, userController.getMe);
 router.put('/me', requireAuth, userController.updateMe);
+router.patch('/me/role', requireAuth, userController.updateUserRole);
 
 // Public or authenticated tutor search with rate limiting (must precede /:id parameter route)
 router.get('/search', optionalAuth, generalApiRateLimiter, userController.searchTutors);
