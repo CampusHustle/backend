@@ -65,6 +65,21 @@ export async function updateProfile(userId, updateData) {
     updates.department = updateData.department.trim();
   }
 
+  // ── Gender ────────────────────────────────────────────────────────────────
+  if (updateData.gender !== undefined) {
+    if (updateData.gender === null || updateData.gender === '') {
+      updates.gender = null;
+    } else if (typeof updateData.gender === 'string') {
+      const normalizedGender = updateData.gender.trim().toLowerCase();
+      if (!['male', 'female'].includes(normalizedGender)) {
+        throw new AppError('Gender must be either male or female.', 400, 'VALIDATION_ERROR');
+      }
+      updates.gender = normalizedGender;
+    } else {
+      throw new AppError('Gender must be a string (male or female).', 400, 'VALIDATION_ERROR');
+    }
+  }
+
   // ── Year ──────────────────────────────────────────────────────────────────
   if (updateData.year !== undefined) {
     const yearMap = {
@@ -198,7 +213,7 @@ export async function getPublicProfile(targetUserId) {
  * @param {string|number} [queryParams.limit=20] - Number of results per page
  * @returns {Promise<{ tutors: Array, total: number, page: number, totalPages: number }>}
  */
-export async function searchTutors(queryParams = {}) {
+export async function searchTutors(queryParams = {}, currentUserId = null) {
   const {
     name,
     subject,
@@ -207,6 +222,7 @@ export async function searchTutors(queryParams = {}) {
     maxPrice,
     minRating,
     role,
+    excludeUserId,
     sortBy = 'rating',
     page = 1,
     limit = 20
@@ -215,6 +231,14 @@ export async function searchTutors(queryParams = {}) {
   const query = {
     isBlocked: false
   };
+
+  // Exclude current authenticated user or explicitly passed excludeUserId
+  const excludeId = currentUserId || excludeUserId;
+  if (excludeId && (typeof excludeId === 'string' || excludeId instanceof Types.ObjectId)) {
+    if (Types.ObjectId.isValid(excludeId)) {
+      query._id = { $ne: new Types.ObjectId(excludeId) };
+    }
+  }
 
   // Filter by role (default to tutor or users with active teaching skills)
   if (role && typeof role === 'string') {

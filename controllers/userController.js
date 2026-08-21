@@ -45,7 +45,8 @@ export async function updateMe(req, res, next) {
  */
 export async function searchTutors(req, res, next) {
   try {
-    const result = await userService.searchTutors(req.query);
+    const currentUserId = req.user?._id || req.query.excludeUserId;
+    const result = await userService.searchTutors(req.query, currentUserId);
     res.status(200).json({
       success: true,
       count: result.tutors.length,

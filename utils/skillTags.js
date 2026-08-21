@@ -2,8 +2,6 @@
  * Canonical list of allowed subject/skill tags for CampusHustle (FR-3).
  * Tags are used for both skillsTeaching and skillsLearning.
  * All comparisons are case-insensitive; values stored in lowercase.
- *
- * Extend this list as new subjects are onboarded — do not use free-text.
  */
 export const ALLOWED_SKILL_TAGS = [
   // Mathematics & Statistics
@@ -22,6 +20,7 @@ export const ALLOWED_SKILL_TAGS = [
   'javascript',
   'c',
   'c++',
+  'c#',
   'data structures',
   'algorithms',
   'operating systems',
@@ -30,6 +29,8 @@ export const ALLOWED_SKILL_TAGS = [
   'software engineering',
   'web development',
   'mobile development',
+  'devops',
+  'cloud computing',
   'machine learning',
   'artificial intelligence',
   'cybersecurity',
@@ -57,6 +58,7 @@ export const ALLOWED_SKILL_TAGS = [
   'engineering drawing',
   'material science',
   'mechanics of materials',
+  'engineering',
 
   // Business & Economics
   'economics',
@@ -82,14 +84,51 @@ export const ALLOWED_SKILL_TAGS = [
   'academic writing',
   'research methods',
 
-  // Other
+  // Extracurricular, Campus & Practical Skills
+  'chess',
+  'graphic design',
+  'public speaking',
+  'music',
+  'guitar',
+  'piano',
+  'photography',
+  'video editing',
+  'tutoring',
   'general',
 ];
 
 /**
- * Validates and normalizes an array of skill tags against the allowed list.
+ * Common abbreviations and shorthand mapped to canonical tags.
+ */
+export const SKILL_TAG_ALIASES = {
+  math: 'mathematics',
+  maths: 'mathematics',
+  calc: 'calculus',
+  'calculus 101': 'calculus',
+  stats: 'statistics',
+  eng: 'english',
+  psych: 'psychology',
+  cs: 'programming',
+  coding: 'programming',
+  dsa: 'data structures',
+  ai: 'artificial intelligence',
+  ml: 'machine learning',
+  se: 'software engineering',
+  'web dev': 'web development',
+  'app dev': 'mobile development',
+  db: 'database systems',
+  os: 'operating systems',
+  cn: 'computer networks',
+  bio: 'biology',
+  chem: 'chemistry',
+  phys: 'physics',
+  econ: 'economics',
+  mgmt: 'business management',
+};
+
+/**
+ * Validates and normalizes an array of skill tags against the allowed list and aliases.
  * Returns lowercase, deduplicated, valid tags.
- * Throws AppError listing the invalid tags if any are found.
  *
  * @param {any} tags - Raw input from the request body
  * @param {string} fieldName - Field name for error messages ('skillsTeaching' | 'skillsLearning')
@@ -109,10 +148,17 @@ export function validateSkillTags(tags, fieldName, AppError) {
     if (typeof t !== 'string') {
       throw new AppError(`Each tag in ${fieldName} must be a string.`, 400, 'VALIDATION_ERROR');
     }
-    return t.trim().toLowerCase();
+    const clean = t.trim().toLowerCase();
+    return SKILL_TAG_ALIASES[clean] || clean;
   });
 
-  const invalid = normalized.filter((t) => !ALLOWED_SKILL_TAGS.includes(t));
+  const invalid = normalized.filter((t) => {
+    if (!t || t.length < 2 || t.length > 40) return true;
+    if (ALLOWED_SKILL_TAGS.includes(t)) return false;
+    // Allow custom campus/extracurricular skills with letters, numbers, spaces, +, #, -
+    return !/^[a-z0-9+#\-\s]{2,40}$/.test(t);
+  });
+
   if (invalid.length > 0) {
     throw new AppError(
       `Invalid skill tags in ${fieldName}: ${invalid.join(', ')}. Use GET /api/users/skills to see allowed tags.`,

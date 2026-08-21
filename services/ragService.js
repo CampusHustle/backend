@@ -70,7 +70,7 @@ export async function generateEmbedding(text, options = {}) {
     throw new AppError('Text to embed must be a non-empty string.', 400, 'INVALID_INPUT');
   }
 
-  const apiKey = options.apiKey || config.geminiApiKey;
+  const apiKey = options.apiKey !== undefined ? options.apiKey : config.geminiApiKey;
   const model = options.model || config.geminiEmbeddingModel || 'text-embedding-004';
   const fetchFn = options.fetchFn || globalThis.fetch;
   const allowMockFallback = options.allowMockFallback !== undefined ? options.allowMockFallback : true;
@@ -177,7 +177,7 @@ export async function batchGenerateEmbeddings(texts, options = {}) {
     }
   }
 
-  const apiKey = options.apiKey || config.geminiApiKey;
+  const apiKey = options.apiKey !== undefined ? options.apiKey : config.geminiApiKey;
   const model = options.model || config.geminiEmbeddingModel || 'text-embedding-004';
   const fetchFn = options.fetchFn || globalThis.fetch;
   const allowMockFallback = options.allowMockFallback !== undefined ? options.allowMockFallback : true;
@@ -248,11 +248,11 @@ export async function batchGenerateEmbeddings(texts, options = {}) {
       }
     } catch (err) {
       if (err instanceof AppError) throw err;
-      // Graceful fallback to sequential processing
-      const sequentialResults = await Promise.all(
-        batch.map((t) => generateEmbedding(t, options))
-      );
-      allEmbeddings.push(...sequentialResults);
+      if (allowMockFallback) {
+        allEmbeddings.push(...batch.map((t) => generateMockEmbedding(t)));
+      } else {
+        throw new AppError(`Failed to generate batch embeddings: ${err.message}`, 500, 'GEMINI_EMBEDDING_FAILED');
+      }
     }
   }
 
@@ -546,7 +546,7 @@ export async function generateGroundedAnswer(question, relevantChunks, options =
     };
   }
 
-  const apiKey = options.apiKey || config.geminiApiKey;
+  const apiKey = options.apiKey !== undefined ? options.apiKey : config.geminiApiKey;
   const model = options.model || config.geminiChatModel || 'gemini-1.5-flash';
   const fetchFn = options.fetchFn || globalThis.fetch;
   const allowMockFallback = options.allowMockFallback !== undefined ? options.allowMockFallback : true;
@@ -679,12 +679,9 @@ export async function askTutorAssistant(tutorId, question, options = {}) {
   }
 
   const cleanQuestion = question.trim();
-  if (cleanQuestion.length < 3) {
-    throw new AppError('Question must be at least 3 characters long.', 400, 'QUESTION_TOO_SHORT');
-  }
 
-  if (cleanQuestion.length > 1000) {
-    throw new AppError('Question cannot exceed 1000 characters.', 400, 'QUESTION_TOO_LONG');
+  if (cleanQuestion.length > 2000) {
+    throw new AppError('Question cannot exceed 2000 characters.', 400, 'QUESTION_TOO_LONG');
   }
 
   // 1. Generate 768-dimensional embedding for query
@@ -717,28 +714,61 @@ export async function generateGeneralAiAnswer(question, options = {}) {
     throw new AppError('Question must be a non-empty string.', 400, 'INVALID_INPUT');
   }
 
+  const cleanQuestion = question.trim();
+  const documentContext = options.documentContext || '';
+  const fileName = options.fileName || '';
+
+  const lower = cleanQuestion.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const GREETINGS = [
+    'hi', 'hello', 'hey', 'selam', 'hola', 'yo', 'greetings', 'salut',
+    'good morning', 'good afternoon', 'good evening', 'hi there', 'hey there', 'sup'
+  ];
+
+  if (!documentContext && GREETINGS.includes(lower)) {
+    return {
+      grounded: true,
+      answer: "Selam! I'm **Felat (ፈላጥ)**, your CampusHustle AI Study Assistant.\n\nHow can I help you with your university courses, exam preparation, formulas, or concepts today?",
+      sources: []
+    };
+  }
+
   const apiKey = options.apiKey || config.geminiApiKey;
   const model = options.model || config.geminiChatModel || 'gemini-1.5-flash';
   const fetchFn = options.fetchFn || globalThis.fetch;
 
   if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey === 'mock_key') {
+    if (documentContext && documentContext.trim()) {
+      return {
+        grounded: true,
+        answer: `### Document Analysis: ${fileName || 'Uploaded Document'}\n\nI have extracted and analyzed the content of your document:\n\n${documentContext.slice(0, 350)}...\n\n### Key Concepts & Step-by-Step Guidance\n1. **Core Requirements**: Review each practical objective specified in the document.\n2. **Implementation Strategy**: Complete tasks sequentially ensuring test verification.\n3. **Study Takeaways**: Verify deliverables match the instructor's assignment guidelines.`,
+        sources: [{ noteId: fileName || 'attachment', pageNumber: 1, text: documentContext.slice(0, 100) }]
+      };
+    }
+
     return {
       grounded: true,
-      answer: `Hello! I'm Felat (ፈላጥ), your CampusHustle AI Study Assistant. Here is guidance for "${question.trim()}": When studying this topic, break it down into fundamental definitions, core formulas, practical examples, and past exam questions.`,
+      answer: `Hello! I'm Felat (ፈላጥ), your CampusHustle AI Study Assistant. Here is guidance for "${cleanQuestion}": When studying this topic, break it down into fundamental definitions, core formulas, practical examples, and past exam questions.`,
       sources: []
     };
   }
 
   const systemInstruction = `You are Felat (ፈላጥ), the premier AI Academic Study Assistant for CampusHustle.
-You help university students master academic subjects across Computer Science, Engineering, Mathematics, Economics, Medicine, Business, Physics, and Chemistry.
+You help university students master academic subjects, understand assignments, solve formulas, debug code, and prepare for exams.
 
 Guidelines for your response formatting:
-- Use clear structure with markdown headings (e.g. ### Key Concepts, ### Step-by-Step Explanation).
+- Use clear structure with markdown headings (e.g. ### Key Concepts, ### Step-by-Step Explanation, ### Practical Implementation).
 - Bold important terms (**key term**) for high scanability.
 - Use clean bullet points (- ) or numbered steps (1. ) rather than dense walls of text.
-- Wrap all code snippets or formulas in fenced code blocks (\`\`\`python, \`\`\`js, etc.) or inline backticks (\`...\`).
+- Wrap all code snippets or formulas in fenced code blocks (\`\`\`bash, \`\`\`yaml, \`\`\`dockerfile, \`\`\`python, \`\`\`js, etc.) or inline backticks (\`...\`).
+- When an attached document is provided, analyze its exact extracted text directly, provide thorough explanations, solutions, or breakdown of its requirements, and never claim you cannot read or open the file.
 - Include practical university-level examples and study takeaways.
 - Be concise, supportive, and academically rigorous.`;
+
+  let promptPayload = `${systemInstruction}\n\n`;
+  if (documentContext && documentContext.trim()) {
+    promptPayload += `ATTACHED STUDY DOCUMENT: "${fileName || 'Uploaded File'}"\nEXTRACTED DOCUMENT CONTENT:\n"""\n${documentContext.slice(0, 15000)}\n"""\n\n`;
+  }
+  promptPayload += `Student Question / Task:\n${cleanQuestion}`;
 
   const cleanModel = model.replace(/^models\//, '');
   const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
@@ -751,12 +781,12 @@ Guidelines for your response formatting:
         contents: [
           {
             role: 'user',
-            parts: [{ text: `${systemInstruction}\n\nStudent Question: ${question.trim()}` }]
+            parts: [{ text: promptPayload }]
           }
         ],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1000
+          maxOutputTokens: 1500
         }
       }),
       signal: AbortSignal.timeout(15000)
