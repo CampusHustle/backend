@@ -226,12 +226,12 @@ export const updateBookingStatus = async (req, res, next) => {
 export const getUserBookings = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { status, role } = req.query;
+    const { status, role, type } = req.query;
 
     let filter = {};
-    if (role === 'student') {
+    if (role === 'student' || type === 'outgoing') {
       filter.studentId = userId;
-    } else if (role === 'tutor') {
+    } else if (role === 'tutor' || type === 'incoming') {
       filter.tutorId = userId;
     } else {
       filter.$or = [{ studentId: userId }, { tutorId: userId }];
