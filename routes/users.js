@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as userController from '../controllers/userController.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, optionalAuth } from '../middleware/auth.js';
 import { generalApiRateLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
@@ -13,7 +13,7 @@ router.get('/me', requireAuth, userController.getMe);
 router.put('/me', requireAuth, userController.updateMe);
 
 // Public or authenticated tutor search with rate limiting (must precede /:id parameter route)
-router.get('/search', generalApiRateLimiter, userController.searchTutors);
+router.get('/search', optionalAuth, generalApiRateLimiter, userController.searchTutors);
 
 // Peer user blocking (FR-13)
 router.post('/block/:id', requireAuth, userController.blockUser);

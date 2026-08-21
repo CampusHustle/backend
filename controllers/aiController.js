@@ -1,38 +1,40 @@
 import { Types } from 'mongoose';
 import { askTutorAssistant, generateGeneralAiAnswer } from '../services/ragService.js';
+import { extractTextFromPdfBuffer } from '../utils/pdfExtractor.js';
 import { AppError } from '../middleware/errorHandler.js';
+import Tesseract from 'tesseract.js';
 
 /**
- * Controller to handle AI Study Assistant queries (both tutor-scoped and general study questions).
+ * Controller to handle AI Study Assistant queries (both tutor-scoped and general study questions,
+ * with real-time PDF extraction and OCR image analysis).
  * 
  * Satisfies FR-11 (Scoped AI Q&A) and Spec Section 8.6 (POST /api/ai/ask).
  * 
  * @param {Express.Request} req - Express request object
  *   - req.body: { tutorId?: string, question: string }
+ *   - req.file?: Multer file buffer (PDF, image, text)
  * @param {Express.Response} res - Express response object
  * @param {Function} next - Express next() error handler
  */
 export async function askQuestion(req, res, next) {
   try {
     const { tutorId, question } = req.body || {};
+    const file = req.file;
 
-    if (!question || typeof question !== 'string' || !question.trim()) {
-      throw new AppError('Question is required and must be a non-empty string.', 400, 'INVALID_QUESTION');
+    const rawQuestion = question || (file ? `Analyze this attached study document: ${file.originalname}` : '');
+
+    if (!rawQuestion || typeof rawQuestion !== 'string' || !rawQuestion.trim()) {
+      throw new AppError('Question or file is required.', 400, 'INVALID_QUESTION');
     }
 
-    const trimmedQuestion = question.trim();
-    if (trimmedQuestion.length < 3) {
-      throw new AppError('Question must be at least 3 characters long.', 400, 'QUESTION_TOO_SHORT');
+    const trimmedQuestion = rawQuestion.trim();
+
+    if (trimmedQuestion.length > 5000) {
+      throw new AppError('Question cannot exceed 5000 characters.', 400, 'QUESTION_TOO_LONG');
     }
 
-<<<<<<< Updated upstream
     if (trimmedQuestion.length > 1000) {
       throw new AppError('Question cannot exceed 1000 characters.', 400, 'QUESTION_TOO_LONG');
-=======
-    let extractedDocumentText = '';
-    if (file && file.buffer) {
-      if (file.mimetype === 'application/pdf' || file.originalname?.toLowerCase().endsWith('.pdf')) {
-        const segments = await extractTextFromPdfBuffer(file.buffer);
         extractedDocumentText = segments
           .map((s) => `[Page ${s.pageNumber}]:\n${s.text}`)
           .join('\n\n');
@@ -58,7 +60,6 @@ export async function askQuestion(req, res, next) {
           extractedDocumentText = `Attached image: ${file.originalname}`;
         }
       }
->>>>>>> Stashed changes
     }
 
     let result;
@@ -66,9 +67,15 @@ export async function askQuestion(req, res, next) {
       if (!Types.ObjectId.isValid(tutorId)) {
         throw new AppError('tutorId must be a valid ObjectId.', 400, 'INVALID_TUTOR_ID');
       }
-      result = await askTutorAssistant(tutorId, trimmedQuestion);
+      result = await askTutorAssistant(tutorId, trimmedQuestion, {
+        documentContext: extractedDocumentText,
+        fileName: file?.originalname
+      });
     } else {
-      result = await generateGeneralAiAnswer(trimmedQuestion);
+      result = await generateGeneralAiAnswer(trimmedQuestion, {
+        documentContext: extractedDocumentText,
+        fileName: file?.originalname
+      });
     }
 
     res.status(200).json({

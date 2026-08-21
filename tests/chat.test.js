@@ -78,26 +78,34 @@ test('Message model - schema has required fields', async () => {
   assert.ok(paths.senderId, 'senderId field missing');
   assert.ok(paths.content, 'content field missing');
   assert.ok(paths.containsContactInfo, 'containsContactInfo field missing');
+  assert.ok(paths.isRead, 'isRead field missing');
+  assert.ok(paths.readAt, 'readAt field missing');
 });
 
-test('Message model - containsContactInfo defaults to false', async () => {
+test('Message model - containsContactInfo and isRead defaults', async () => {
   const { Message } = await import('../models/Message.js');
-  const defaultValue = Message.schema.paths.containsContactInfo.defaultValue;
-  assert.equal(defaultValue, false);
+  assert.equal(Message.schema.paths.containsContactInfo.defaultValue, false);
+  assert.equal(Message.schema.paths.isRead.defaultValue, false);
 });
 
 // ─── Socket Server ────────────────────────────────────────────────────────────
 
-test('socketServer - initSocketServer and buildConversationId are exported', async () => {
+test('socketServer - initSocketServer, buildConversationId, getIo, and emitToUser are exported', async () => {
   const mod = await import('../socket/socketServer.js');
   assert.equal(typeof mod.initSocketServer, 'function');
   assert.equal(typeof mod.buildConversationId, 'function');
+  assert.equal(typeof mod.getIo, 'function');
+  assert.equal(typeof mod.emitToUser, 'function');
 });
 
 // ─── Message Routes / Controller ─────────────────────────────────────────────
 
-test('messageController - getMessages and getMessagesByUser are exported', async () => {
+test('messageController - all required handler functions are exported', async () => {
   const mod = await import('../controllers/messageController.js');
   assert.equal(typeof mod.getMessages, 'function');
   assert.equal(typeof mod.getMessagesByUser, 'function');
+  assert.equal(typeof mod.getConversations, 'function');
+  assert.equal(typeof mod.getUnreadCount, 'function');
+  assert.equal(typeof mod.markConversationAsRead, 'function');
+  assert.equal(typeof mod.sendMessage, 'function');
 });

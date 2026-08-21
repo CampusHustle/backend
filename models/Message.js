@@ -24,6 +24,15 @@ const messageSchema = new mongoose.Schema(
     containsContactInfo: {
       type: Boolean,
       default: false
+    },
+    isRead: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+    readAt: {
+      type: Date,
+      default: null
     }
   },
   {
@@ -31,7 +40,8 @@ const messageSchema = new mongoose.Schema(
   }
 );
 
-// Index for efficient paginated history retrieval per conversation
+// Index for efficient paginated history retrieval per conversation and unread queries
 messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index({ conversationId: 1, senderId: 1, isRead: 1 });
 
 export const Message = mongoose.model('Message', messageSchema);
