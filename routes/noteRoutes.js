@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth, optionalAuth, requireRole } from '../middleware/auth.js';
 import { writeActionRateLimiter, generalApiRateLimiter } from '../middleware/rateLimiter.js';
-import { uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes, getMyPurchases } from '../controllers/noteController.js';
+import { uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes, getMyPurchases, getMyNotes, updateNote, deleteNote } from '../controllers/noteController.js';
 
 const router = Router();
 
@@ -34,6 +34,13 @@ router.post('/', writeActionRateLimiter, requireAuth, upload.single('file'), upl
  */
 router.get('/purchases/me', generalApiRateLimiter, requireAuth, getMyPurchases);
 router.get('/purchases', generalApiRateLimiter, requireAuth, getMyPurchases);
+
+/**
+ * GET /notes/mine
+ * Retrieve all notes belonging to the authenticated tutor ("My Notes").
+ * Must be declared before GET /:noteId to avoid being captured as a noteId.
+ */
+router.get('/mine', generalApiRateLimiter, requireAuth, getMyNotes);
 
 /**
  * GET /notes/search
@@ -91,5 +98,43 @@ router.get('/:noteId', optionalAuth, getNoteById);
  * NFR-1 compliance: Auth via JWT
  */
 router.post('/:noteId/purchase', writeActionRateLimiter, requireAuth, purchaseNote);
+
+/**
+ * PATCH /notes/:noteId
+ * PUT  /notes/:noteId
+ * Update an existing note's metadata (title, course, description, price, previewPages).
+ *
+ * Authentication: Required (Bearer JWT)
+ * Authorization: Only the owning tutor (verified in controller)
+ *
+ * Request body: any subset of { title, course, description, price, previewPages }
+ *
+ * Response (200):
+ *   { success: true, message: "Note updated successfully.", note: {...} }
+ *
+ * Errors:
+ *   - 404 NOTE_NOT_FOUND
+ *   - 403 NOT_NOTE_OWNER
+ *   - 400 invalid field values / NO_UPDATES_PROVIDED
+ */
+router.patch('/:noteId', writeActionRateLimiter, requireAuth, updateNote);
+router.put('/:noteId', writeActionRateLimiter, requireAuth, updateNote);
+
+/**
+ * DELETE /notes/:noteId
+ * Delete an existing note owned by the authenticated tutor.
+ * Cleans up associated RAG chunks and best-effort removes the Cloudinary asset.
+ *
+ * Authentication: Required (Bearer JWT)
+ * Authorization: Only the owning tutor (verified in controller)
+ *
+ * Response (200):
+ *   { success: true, message: "Note deleted successfully." }
+ *
+ * Errors:
+ *   - 404 NOTE_NOT_FOUND
+ *   - 403 NOT_NOTE_OWNER
+ */
+router.delete('/:noteId', writeActionRateLimiter, requireAuth, deleteNote);
 
 export default router;

@@ -14,6 +14,7 @@ import {
   cosineSimilarity,
   searchChunksBySimilarity,
   generateGroundedAnswer,
+  generateGeneralAiAnswer,
   askTutorAssistant
 } from '../services/ragService.js';
 import { validateChunk } from '../utils/chunkingUtils.js';
@@ -537,15 +538,25 @@ test('askTutorAssistant - validates input question constraints', async () => {
   );
 
   await assert.rejects(
-    () => askTutorAssistant('tutor123', 'hi'), // < 3 chars
-    (err) => err.code === 'QUESTION_TOO_SHORT'
+    () => askTutorAssistant('tutor123', ''), // empty
+    (err) => err.code === 'INVALID_QUESTION'
   );
 
-  const hugeQuestion = 'q'.repeat(1005);
+  const hugeQuestion = 'q'.repeat(2005);
   await assert.rejects(
-    () => askTutorAssistant('tutor123', hugeQuestion), // > 1000 chars
+    () => askTutorAssistant('tutor123', hugeQuestion), // > 2000 chars
     (err) => err.code === 'QUESTION_TOO_LONG'
   );
+});
+
+test('generateGeneralAiAnswer - returns welcoming greeting for short conversational hello/hi/selam', async () => {
+  const greetingRes = await generateGeneralAiAnswer('hi');
+  assert.equal(greetingRes.grounded, true);
+  assert.ok(greetingRes.answer.includes('Felat (ፈላጥ)'));
+
+  const selamRes = await generateGeneralAiAnswer('selam');
+  assert.equal(selamRes.grounded, true);
+  assert.ok(selamRes.answer.includes('Felat (ፈላጥ)'));
 });
 
 test('deleteChunksByNote - enforces tutor ownership on deletion (STRIDE Tampering/Elevation of Privilege)', async () => {
