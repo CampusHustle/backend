@@ -8,7 +8,7 @@ import { createNotification } from '../services/notificationService.js';
 import cloudinary from '../config/cloudinary.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { processOcrToPdf } from '../utils/ocrHelper.js';
-import { processAndStoreNoteChunks } from '../services/ragService.js';
+import { processAndStoreNoteChunks, deleteChunksByNote } from '../services/ragService.js';
 import { extractTextFromPdfBuffer } from '../utils/pdfExtractor.js';
 
 /**
@@ -261,7 +261,7 @@ export async function uploadNote(req, res, next) {
       if (processedFile.extractedText && processedFile.extractedText.trim()) {
         textSegments = [{ text: processedFile.extractedText.trim(), pageNumber: 1 }];
       } else if (processedFile.buffer) {
-        textSegments = extractTextFromPdfBuffer(processedFile.buffer);
+        textSegments = await extractTextFromPdfBuffer(processedFile.buffer);
       }
 
       // If no text could be extracted from PDF streams, fallback to metadata summary
@@ -611,6 +611,256 @@ export async function purchaseNote(req, res, next) {
       purchase: savedPurchase
     });
 
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Fetch all notes belonging to the authenticated tutor ("My Notes").
+ * Unlike getNotesByTutor (public, by tutorId param), this endpoint is scoped
+ * to req.user so tutors always manage their own listings.
+ *
+ * @param {Express.Request} req - req.user from requireAuth middleware
+ * @param {Express.Response} res
+ * @param {Function} next
+ */
+export async function getMyNotes(req, res, next) {
+  try {
+    if (!req.user) {
+      throw new AppError('Authentication required.', 401, 'UNAUTHORIZED');
+    }
+
+    const notes = await Note.find({ tutorId: req.user._id })
+      .sort({ createdAt: -1 })
+      .select('-__v');
+
+    res.status(200).json({
+      success: true,
+      count: notes.length,
+      notes
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Validate editable note metadata supplied in the request body.
+ * Returns a sanitized $set payload containing only provided fields.
+ *
+ * Errors:
+ *   - 400 if title/course is empty or price/previewPages invalid
+ */
+function buildNoteUpdatePayload(body = {}) {
+  const updates = {};
+
+  if (body.title !== undefined) {
+    if (typeof body.title !== 'string' || !body.title.trim()) {
+      throw new AppError('Title cannot be empty.', 400, 'MISSING_REQUIRED_FIELDS');
+    }
+    updates.title = body.title.trim();
+  }
+
+  if (body.course !== undefined) {
+    if (typeof body.course !== 'string' || !body.course.trim()) {
+      throw new AppError('Course cannot be empty.', 400, 'MISSING_REQUIRED_FIELDS');
+    }
+    updates.course = body.course.trim();
+  }
+
+  if (body.description !== undefined) {
+    if (body.description !== null && typeof body.description !== 'string') {
+      throw new AppError('Description must be a string.', 400, 'INVALID_DESCRIPTION');
+    }
+    updates.description = body.description ? body.description.trim() : '';
+  }
+
+  if (body.price !== undefined && body.price !== null && body.price !== '') {
+    const parsedPrice = parseFloat(body.price);
+    if (!Number.isFinite(parsedPrice)) {
+      throw new AppError('Price must be a valid number.', 400, 'INVALID_PRICE_FORMAT');
+    }
+    if (parsedPrice < 0 || parsedPrice > 100000) {
+      throw new AppError('Price must be between 0 and 100,000.', 400, 'PRICE_OUT_OF_RANGE');
+    }
+    updates.price = parsedPrice;
+  }
+
+  if (body.previewPages !== undefined && body.previewPages !== null && body.previewPages !== '') {
+    const parsedPreviewPages = parseInt(body.previewPages, 10);
+    if (!Number.isFinite(parsedPreviewPages) || parsedPreviewPages < 1 || parsedPreviewPages > 100) {
+      throw new AppError('Preview pages must be an integer between 1 and 100.', 400, 'INVALID_PREVIEW_PAGES');
+    }
+    updates.previewPages = parsedPreviewPages;
+  }
+
+  return updates;
+}
+
+/**
+ * Helper to derive the Cloudinary public_id from a stored file URL.
+ * Example:
+ *   https://res.cloudinary.com/demo/raw/upload/v123/campushustle/notes/abc.pdf
+ *   -> campushustle/notes/abc
+ */
+function extractCloudinaryPublicId(fileUrl) {
+  try {
+    const uploadMarker = '/upload/';
+    const uploadIndex = fileUrl.indexOf(uploadMarker);
+    if (uploadIndex === -1) return null;
+
+    let segments = fileUrl.slice(uploadIndex + uploadMarker.length).split('/').filter(Boolean);
+
+    // Strip version segment(s), e.g. "v1712345678"
+    while (segments.length > 0 && /^v\d+$/.test(segments[0])) {
+      segments = segments.slice(1);
+    }
+
+    const publicId = segments.join('/').replace(/\.[^.]+$/, '');
+    return publicId || null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+/**
+ * Update an existing note's metadata. Only the owning tutor may edit.
+ * File replacement is not supported here; re-upload creates a new note.
+ *
+ * Flow:
+ *   1. Validate note exists
+ *   2. Enforce ownership (403 otherwise)
+ *   3. Sanitize & validate updatable fields (title, course, description, price, previewPages)
+ *   4. Persist with validators enabled
+ *   5. Return updated note
+ *
+ * Errors:
+ *   - 404 NOTE_NOT_FOUND
+ *   - 403 NOT_NOTE_OWNER
+ *   - 400 for invalid field values
+ *
+ * @param {Express.Request} req
+ *   - req.params.noteId: ID of the note to update
+ *   - req.body: any subset of {title, course, description, price, previewPages}
+ *   - req.user: Authenticated tutor from requireAuth middleware
+ * @param {Express.Response} res
+ * @param {Function} next
+ */
+export async function updateNote(req, res, next) {
+  try {
+    const { noteId } = req.params;
+
+    // 1. Validate note exists
+    const note = await Note.findById(noteId);
+    if (!note) {
+      throw new AppError('Note not found.', 404, 'NOTE_NOT_FOUND');
+    }
+
+    // 2. Enforce ownership
+    if (note.tutorId.toString() !== req.user._id.toString()) {
+      throw new AppError(
+        'You do not have permission to edit this note.',
+        403,
+        'NOT_NOTE_OWNER'
+      );
+    }
+
+    // 3. Sanitize & validate fields
+    const updates = buildNoteUpdatePayload(req.body);
+    if (Object.keys(updates).length === 0) {
+      throw new AppError(
+        'No valid fields provided to update.',
+        400,
+        'NO_UPDATES_PROVIDED'
+      );
+    }
+
+    // 4. Persist with schema validators
+    const updatedNote = await Note.findByIdAndUpdate(noteId, { $set: updates }, {
+      new: true,
+      runValidators: true
+    }).select('-__v');
+
+    // 5. Return updated note
+    res.status(200).json({
+      success: true,
+      message: 'Note updated successfully.',
+      note: updatedNote
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Delete an existing note. Only the owning tutor may delete.
+ * Also cleans up associated RAG chunks and attempts best-effort
+ * removal of the underlying file from Cloudinary.
+ *
+ * Flow:
+ *   1. Validate note exists
+ *   2. Enforce ownership (403 otherwise)
+ *   3. Delete RAG chunks scoped to this note/tutor
+ *   4. Best-effort Cloudinary asset deletion (failures ignored)
+ *   5. Delete Note document
+ *   6. Return success
+ *
+ * Errors:
+ *   - 404 NOTE_NOT_FOUND
+ *   - 403 NOT_NOTE_OWNER
+ *
+ * @param {Express.Request} req
+ *   - req.params.noteId: ID of the note to delete
+ *   - req.user: Authenticated tutor from requireAuth middleware
+ * @param {Express.Response} res
+ * @param {Function} next
+ */
+export async function deleteNote(req, res, next) {
+  try {
+    const { noteId } = req.params;
+
+    // 1. Validate note exists
+    const note = await Note.findById(noteId);
+    if (!note) {
+      throw new AppError('Note not found.', 404, 'NOTE_NOT_FOUND');
+    }
+
+    // 2. Enforce ownership
+    if (note.tutorId.toString() !== req.user._id.toString()) {
+      throw new AppError(
+        'You do not have permission to delete this note.',
+        403,
+        'NOT_NOTE_OWNER'
+      );
+    }
+
+    // 3. Delete RAG chunks scoped to this note (FR-11 cleanup)
+    try {
+      await deleteChunksByNote(note._id, note.tutorId);
+    } catch (chunkErr) {
+      console.error('[RAG Chunk Deletion Error]', chunkErr.message);
+    }
+
+    // 4. Best-effort Cloudinary asset removal (never blocks deletion)
+    try {
+      const publicId = extractCloudinaryPublicId(note.fileUrl || '');
+      if (publicId) {
+        const resourceType = /\.pdf$/i.test(note.fileUrl) ? 'raw' : 'image';
+        await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+      }
+    } catch (cloudinaryErr) {
+      console.error('[Cloudinary Deletion Error]', cloudinaryErr.message);
+    }
+
+    // 5. Delete Note document
+    await Note.findByIdAndDelete(noteId);
+
+    // 6. Return success
+    res.status(200).json({
+      success: true,
+      message: 'Note deleted successfully.'
+    });
   } catch (error) {
     next(error);
   }
