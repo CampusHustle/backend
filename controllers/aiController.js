@@ -25,8 +25,40 @@ export async function askQuestion(req, res, next) {
       throw new AppError('Question must be at least 3 characters long.', 400, 'QUESTION_TOO_SHORT');
     }
 
+<<<<<<< Updated upstream
     if (trimmedQuestion.length > 1000) {
       throw new AppError('Question cannot exceed 1000 characters.', 400, 'QUESTION_TOO_LONG');
+=======
+    let extractedDocumentText = '';
+    if (file && file.buffer) {
+      if (file.mimetype === 'application/pdf' || file.originalname?.toLowerCase().endsWith('.pdf')) {
+        const segments = await extractTextFromPdfBuffer(file.buffer);
+        extractedDocumentText = segments
+          .map((s) => `[Page ${s.pageNumber}]:\n${s.text}`)
+          .join('\n\n');
+        
+        // If pure-text stream extraction got empty (e.g. scanned image PDF), note this
+        if (!extractedDocumentText.trim()) {
+          extractedDocumentText = `PDF Document: ${file.originalname} (Binary/scanned content processed)`;
+        }
+      } else if (
+        file.mimetype.startsWith('text/') ||
+        file.originalname?.toLowerCase().endsWith('.txt') ||
+        file.originalname?.toLowerCase().endsWith('.md') ||
+        file.originalname?.toLowerCase().endsWith('.json')
+      ) {
+        extractedDocumentText = file.buffer.toString('utf-8');
+      } else if (file.mimetype.startsWith('image/')) {
+        try {
+          const ocrResult = await Tesseract.recognize(file.buffer, 'eng+amh', {
+            logger: () => {}
+          });
+          extractedDocumentText = ocrResult?.data?.text || '';
+        } catch {
+          extractedDocumentText = `Attached image: ${file.originalname}`;
+        }
+      }
+>>>>>>> Stashed changes
     }
 
     let result;
