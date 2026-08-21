@@ -605,10 +605,12 @@ Answer:`;
         ],
         generationConfig: {
           temperature: 0.2,
-          maxOutputTokens: 800
+          // gemini-3.x models consume "thinking" tokens from this budget
+          // before producing visible output; keep it generous to avoid MAX_TOKENS truncation.
+          maxOutputTokens: 4096
         }
       }),
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(30000)
     });
 
     if (response.status === 429) {
@@ -733,7 +735,7 @@ export async function generateGeneralAiAnswer(question, options = {}) {
   }
 
   const apiKey = options.apiKey || config.geminiApiKey;
-  const model = options.model || config.geminiChatModel || 'gemini-1.5-flash';
+  const model = options.model || config.geminiChatModel || 'gemini-3.5-flash-lite';
   const fetchFn = options.fetchFn || globalThis.fetch;
 
   if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey === 'mock_key') {
@@ -789,7 +791,7 @@ Guidelines for your response formatting:
           maxOutputTokens: 1500
         }
       }),
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(30000)
     });
 
     if (!response.ok) {

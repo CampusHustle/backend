@@ -30,5 +30,5 @@ export const config = {
   // Google Gemini API credentials & configuration for RAG embeddings and Q&A
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001',
-  geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash'
+  geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash-lite'
 };

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import Note from '../models/Note.js';
 import Purchase from '../models/Purchase.js';
+import NoteChunk from '../models/NoteChunk.js';
 import { processOcrToPdf } from '../utils/ocrHelper.js';
-import { prepareUploadedNoteFile, uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes, getMyPurchases } from '../controllers/noteController.js';
+import { prepareUploadedNoteFile, uploadNote, getNotesByTutor, getNoteById, purchaseNote, searchNotes, getMyPurchases, getMyNotes, updateNote, deleteNote } from '../controllers/noteController.js';
 import { optionalAuth } from '../middleware/auth.js';
 import noteRoutes from '../routes/noteRoutes.js';
 
@@ -748,13 +749,17 @@ test('Note API Contract - verifies endpoint paths and methods (FR-9, FR-10, Spec
   const expectedContract = [
     { method: 'POST', path: '/api/notes', description: 'Upload note (PDF/image OCR)' },
     { method: 'GET', path: '/api/notes/search', description: 'Search and browse notes' },
+    { method: 'GET', path: '/api/notes/mine', description: 'Get authenticated tutor notes ("My Notes")' },
     { method: 'GET', path: '/api/notes/tutor/:tutorId', description: 'Get notes by tutor' },
     { method: 'GET', path: '/api/notes/:noteId', description: 'Get single note detail/preview' },
+    { method: 'PATCH', path: '/api/notes/:noteId', description: 'Edit note metadata (owner only)' },
+    { method: 'PUT', path: '/api/notes/:noteId', description: 'Edit note metadata (owner only)' },
+    { method: 'DELETE', path: '/api/notes/:noteId', description: 'Delete note (owner only)' },
     { method: 'POST', path: '/api/notes/:noteId/purchase', description: 'Purchase a note' },
     { method: 'GET', path: '/api/notes/purchases/me', description: 'Get user purchase records' }
   ];
 
-  assert.equal(expectedContract.length, 6);
+  assert.equal(expectedContract.length, 10);
   expectedContract.forEach(route => {
     assert.ok(route.path.startsWith('/api/notes'));
   });
@@ -872,6 +877,278 @@ test('optionalAuth Middleware - passes through silently without error when Autho
 
   assert.equal(nextCalled, true);
   assert.equal(req.user, undefined);
+});
+
+// ============================================================================
+// Section 5: Integration Tests — "My Notes" (list / edit / delete)
+// ============================================================================
+
+test('getMyNotes Controller - returns notes scoped to authenticated tutor', async () => {
+  const originalFind = Note.find;
+  try {
+    const mockNotes = [
+      { _id: 'note1', title: 'My Calculus Ch 1', course: 'MATH101', price: 20 },
+      { _id: 'note2', title: 'My Calculus Ch 2', course: 'MATH101', price: 25 }
+    ];
+
+    Note.find = (filter) => {
+      assert.equal(filter.tutorId, 'tutor123');
+      return {
+        sort: () => ({
+          select: () => Promise.resolve(mockNotes)
+        })
+      };
+    };
+
+    const req = { user: { _id: 'tutor123' } };
+    let responseStatus = null;
+    let responseData = null;
+
+    const res = {
+      status(code) { responseStatus = code; return this; },
+      json(data) { responseData = data; return this; }
+    };
+
+    await getMyNotes(req, res, () => {});
+
+    assert.equal(responseStatus, 200);
+    assert.equal(responseData.success, true);
+    assert.equal(responseData.count, 2);
+    assert.equal(responseData.notes.length, 2);
+  } finally {
+    Note.find = originalFind;
+  }
+});
+
+test('getMyNotes Controller - requires authentication (401 UNAUTHORIZED)', async () => {
+  const req = {};
+  let capturedError = null;
+
+  await getMyNotes(req, {}, (err) => { capturedError = err; });
+
+  assert.notEqual(capturedError, null);
+  assert.equal(capturedError.statusCode, 401);
+  assert.equal(capturedError.code, 'UNAUTHORIZED');
+});
+
+test('updateNote Controller - updates metadata for owning tutor (200 OK)', async () => {
+  const originalFindById = Note.findById;
+  const originalFindByIdAndUpdate = Note.findByIdAndUpdate;
+  try {
+    const tutorId = '507f1f77bcf86cd799439011';
+    Note.findById = () => Promise.resolve({
+      _id: 'note123',
+      tutorId,
+      title: 'Old Title',
+      price: 10
+    });
+
+    let capturedUpdate = null;
+    Note.findByIdAndUpdate = (id, update, options) => {
+      capturedUpdate = { id, update, options };
+      return {
+        select: () => Promise.resolve({
+          _id: id,
+          tutorId,
+          ...update.$set
+        })
+      };
+    };
+
+    const req = {
+      params: { noteId: 'note123' },
+      body: { title: 'New Title', price: '49.99', previewPages: '5' },
+      user: { _id: tutorId }
+    };
+
+    let responseStatus = null;
+    let responseData = null;
+
+    const res = {
+      status(code) { responseStatus = code; return this; },
+      json(data) { responseData = data; return this; }
+    };
+
+    await updateNote(req, res, () => {});
+
+    assert.equal(responseStatus, 200);
+    assert.equal(responseData.success, true);
+    assert.equal(responseData.note.title, 'New Title');
+    assert.equal(responseData.note.price, 49.99);
+    assert.equal(responseData.note.previewPages, 5);
+    assert.equal(capturedUpdate.options.new, true);
+    assert.equal(capturedUpdate.options.runValidators, true);
+  } finally {
+    Note.findById = originalFindById;
+    Note.findByIdAndUpdate = originalFindByIdAndUpdate;
+  }
+});
+
+test('updateNote Controller - rejects non-owner with 403 NOT_NOTE_OWNER', async () => {
+  const originalFindById = Note.findById;
+  try {
+    Note.findById = () => Promise.resolve({
+      _id: 'note123',
+      tutorId: 'ownerTutor',
+      title: 'Not Yours'
+    });
+
+    const req = {
+      params: { noteId: 'note123' },
+      body: { title: 'Hijacked Title' },
+      user: { _id: 'impostorTutor' }
+    };
+    let capturedError = null;
+
+    await updateNote(req, {}, (err) => { capturedError = err; });
+
+    assert.notEqual(capturedError, null);
+    assert.equal(capturedError.statusCode, 403);
+    assert.equal(capturedError.code, 'NOT_NOTE_OWNER');
+  } finally {
+    Note.findById = originalFindById;
+  }
+});
+
+test('updateNote Controller - returns 404 NOTE_NOT_FOUND when note does not exist', async () => {
+  const originalFindById = Note.findById;
+  try {
+    Note.findById = () => Promise.resolve(null);
+
+    const req = {
+      params: { noteId: 'missing_note' },
+      body: { title: 'Whatever' },
+      user: { _id: 'tutor123' }
+    };
+    let capturedError = null;
+
+    await updateNote(req, {}, (err) => { capturedError = err; });
+
+    assert.notEqual(capturedError, null);
+    assert.equal(capturedError.statusCode, 404);
+    assert.equal(capturedError.code, 'NOTE_NOT_FOUND');
+  } finally {
+    Note.findById = originalFindById;
+  }
+});
+
+test('updateNote Controller - validates price range on edit (400 PRICE_OUT_OF_RANGE)', async () => {
+  const originalFindById = Note.findById;
+  try {
+    const tutorId = 'tutor123';
+    Note.findById = () => Promise.resolve({ _id: 'note123', tutorId });
+
+    const req = {
+      params: { noteId: 'note123' },
+      body: { price: -50 },
+      user: { _id: tutorId }
+    };
+    let capturedError = null;
+
+    await updateNote(req, {}, (err) => { capturedError = err; });
+
+    assert.notEqual(capturedError, null);
+    assert.equal(capturedError.statusCode, 400);
+    assert.equal(capturedError.code, 'PRICE_OUT_OF_RANGE');
+  } finally {
+    Note.findById = originalFindById;
+  }
+});
+
+test('deleteNote Controller - deletes owned note and cleans up RAG chunks (200 OK)', async () => {
+  const originalFindById = Note.findById;
+  const originalFindByIdAndDelete = Note.findByIdAndDelete;
+  const originalChunkDeleteMany = NoteChunk.deleteMany;
+  try {
+    const tutorId = '507f1f77bcf86cd799439011';
+    Note.findById = () => Promise.resolve({
+      _id: 'note123',
+      tutorId,
+      title: 'To Be Deleted',
+      fileUrl: 'https://res.cloudinary.com/demo/raw/upload/v1712345678/campushustle/notes/tutor_123_notes.pdf'
+    });
+
+    let deletedNoteId = null;
+    Note.findByIdAndDelete = (id) => {
+      deletedNoteId = id;
+      return Promise.resolve({ _id: id });
+    };
+
+    let chunkFilter = null;
+    NoteChunk.deleteMany = (filter) => {
+      chunkFilter = filter;
+      return Promise.resolve({ deletedCount: 4 });
+    };
+
+    const req = {
+      params: { noteId: 'note123' },
+      user: { _id: tutorId }
+    };
+
+    let responseStatus = null;
+    let responseData = null;
+
+    const res = {
+      status(code) { responseStatus = code; return this; },
+      json(data) { responseData = data; return this; }
+    };
+
+    await deleteNote(req, res, () => {});
+
+    assert.equal(responseStatus, 200);
+    assert.equal(responseData.success, true);
+    assert.equal(deletedNoteId, 'note123');
+    assert.deepEqual(chunkFilter, { noteId: 'note123', tutorId });
+  } finally {
+    Note.findById = originalFindById;
+    Note.findByIdAndDelete = originalFindByIdAndDelete;
+    NoteChunk.deleteMany = originalChunkDeleteMany;
+  }
+});
+
+test('deleteNote Controller - rejects non-owner with 403 NOT_NOTE_OWNER', async () => {
+  const originalFindById = Note.findById;
+  try {
+    Note.findById = () => Promise.resolve({
+      _id: 'note123',
+      tutorId: 'ownerTutor'
+    });
+
+    const req = {
+      params: { noteId: 'note123' },
+      user: { _id: 'impostorTutor' }
+    };
+    let capturedError = null;
+
+    await deleteNote(req, {}, (err) => { capturedError = err; });
+
+    assert.notEqual(capturedError, null);
+    assert.equal(capturedError.statusCode, 403);
+    assert.equal(capturedError.code, 'NOT_NOTE_OWNER');
+  } finally {
+    Note.findById = originalFindById;
+  }
+});
+
+test('deleteNote Controller - returns 404 NOTE_NOT_FOUND when note does not exist', async () => {
+  const originalFindById = Note.findById;
+  try {
+    Note.findById = () => Promise.resolve(null);
+
+    const req = {
+      params: { noteId: 'missing_note' },
+      user: { _id: 'tutor123' }
+    };
+    let capturedError = null;
+
+    await deleteNote(req, {}, (err) => { capturedError = err; });
+
+    assert.notEqual(capturedError, null);
+    assert.equal(capturedError.statusCode, 404);
+    assert.equal(capturedError.code, 'NOTE_NOT_FOUND');
+  } finally {
+    Note.findById = originalFindById;
+  }
 });
 
 
