@@ -110,6 +110,10 @@ const userSchema = new mongoose.Schema(
       ],
       default: []
     },
+    lastActiveAt: {
+      type: Date,
+      default: Date.now
+    },
     refreshTokenHash: {
       type: String,
       default: null,

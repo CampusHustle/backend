@@ -217,21 +217,6 @@ export async function sendMessage(req, res, next) {
       emitToUser(otherId, 'message:notify', payload);
     }
 
-    const snippet = content.trim().length > 50 ? `${content.trim().substring(0, 47)}...` : content.trim();
-    const notification = await createNotification({
-      recipientId: otherId,
-      senderId: userId,
-      type: 'new_message',
-      title: `New Message from ${req.user.name}`,
-      message: snippet,
-      referenceId: message._id,
-      referenceType: 'message'
-    });
-
-    if (notification && io) {
-      emitToUser(otherId, 'notification:new', notification);
-    }
-
     res.status(201).json({
       success: true,
       message: payload

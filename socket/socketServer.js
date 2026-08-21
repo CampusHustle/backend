@@ -15,6 +15,7 @@ import { createNotification } from '../services/notificationService.js';
  * @returns {string}
  */
 let ioInstance = null;
+const onlineUsersMap = new Map();
 
 /**
  * Returns the active Socket.io server instance.
@@ -22,6 +23,24 @@ let ioInstance = null;
  */
 export function getIo() {
   return ioInstance;
+}
+
+/**
+ * Checks whether a specific user currently has an active socket connection.
+ * @param {string} userId
+ * @returns {boolean}
+ */
+export function isUserOnline(userId) {
+  if (!userId) return false;
+  return onlineUsersMap.has(userId.toString()) && onlineUsersMap.get(userId.toString()).size > 0;
+}
+
+/**
+ * Returns array of online user ID strings.
+ * @returns {string[]}
+ */
+export function getOnlineUserIds() {
+  return Array.from(onlineUsersMap.keys());
 }
 
 /**
@@ -119,6 +138,39 @@ export function initSocketServer(io) {
 
   io.on('connection', (socket) => {
     const userId = socket.user._id.toString();
+    const now = new Date();
+
+    // Track active connected socket
+    if (!onlineUsersMap.has(userId)) {
+      onlineUsersMap.set(userId, new Set());
+    }
+    onlineUsersMap.get(userId).add(socket.id);
+
+    // Update user's lastActiveAt timestamp in DB
+    User.findByIdAndUpdate(userId, { $set: { lastActiveAt: now } }).catch(() => {});
+
+    // Broadcast user online status
+    io.emit('user:status', {
+      userId,
+      isOnline: true,
+      lastActiveAt: now.toISOString()
+    });
+
+    // Send current list of online users to newly connected socket
+    socket.emit('users:online_list', {
+      onlineUserIds: Array.from(onlineUsersMap.keys())
+    });
+
+    // Handle heartbeat to keep presence refreshed
+    socket.on('user:heartbeat', async () => {
+      const pingTime = new Date();
+      User.findByIdAndUpdate(userId, { $set: { lastActiveAt: pingTime } }).catch(() => {});
+      io.emit('user:status', {
+        userId,
+        isOnline: true,
+        lastActiveAt: pingTime.toISOString()
+      });
+    });
 
     // Automatically join the user's personal room for direct notifications
     socket.join(`user:${userId}`);
@@ -209,22 +261,6 @@ export function initSocketServer(io) {
 
         // Deliver live real-time notification badge event to recipient's personal room
         io.to(`user:${otherId}`).emit('message:notify', payload);
-
-        // FR-14: Trigger persistent notification for message recipient
-        const snippet = content.trim().length > 50 ? `${content.trim().substring(0, 47)}...` : content.trim();
-        const notification = await createNotification({
-          recipientId: otherId,
-          senderId: userId,
-          type: 'new_message',
-          title: `New Message from ${socket.user.name}`,
-          message: snippet,
-          referenceId: message._id,
-          referenceType: 'message'
-        });
-
-        if (notification) {
-          io.to(`user:${otherId}`).emit('notification:new', notification);
-        }
       } catch (err) {
         console.error('[Socket] message:send error:', err.message);
         socket.emit('error', { code: 'SERVER_ERROR', message: 'Failed to send message.' });
@@ -256,7 +292,20 @@ export function initSocketServer(io) {
 
     // ── disconnect ──────────────────────────────────────────────────────────
     socket.on('disconnect', () => {
-      // Socket.io automatically cleans up room memberships on disconnect
+      const userSockets = onlineUsersMap.get(userId);
+      if (userSockets) {
+        userSockets.delete(socket.id);
+        if (userSockets.size === 0) {
+          onlineUsersMap.delete(userId);
+          const disconnectTime = new Date();
+          User.findByIdAndUpdate(userId, { $set: { lastActiveAt: disconnectTime } }).catch(() => {});
+          io.emit('user:status', {
+            userId,
+            isOnline: false,
+            lastActiveAt: disconnectTime.toISOString()
+          });
+        }
+      }
     });
   });
 }
