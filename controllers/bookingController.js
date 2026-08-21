@@ -20,6 +20,9 @@ export const createBooking = async (req, res, next) => {
     }
 
     if (!slot && tutorId) {
+      if (!mongoose.Types.ObjectId.isValid(tutorId)) {
+        throw new AppError('Valid tutorId is required.', 400, 'INVALID_TUTOR_ID');
+      }
       const dayMap = {
         Mon: 'Monday',
         Tue: 'Tuesday',
@@ -56,7 +59,7 @@ export const createBooking = async (req, res, next) => {
         slot = new Availability({ tutorId, dayOfWeek: selectedDay, startTime: sTime, endTime: eTime, isBooked: false });
         await slot.save();
       }
-    } else {
+    } else if (!slot) {
       throw new AppError('availabilityId or tutorId is required.', 400, 'MISSING_REQUIRED_FIELDS');
     }
 
@@ -91,6 +94,7 @@ export const createBooking = async (req, res, next) => {
     });
 
     await newBooking.save();
+    console.log(`[BookingCreated] ID: ${newBooking._id}, Student: ${studentId}, Tutor: ${slot.tutorId}, Availability: ${slot._id}`);
 
     // Trigger notification for tutor (FR-14)
     await createNotification({
