@@ -14,8 +14,36 @@ import { createNotification } from '../services/notificationService.js';
  * @param {string} idB
  * @returns {string}
  */
+let ioInstance = null;
+
+/**
+ * Returns the active Socket.io server instance.
+ * @returns {import('socket.io').Server|null}
+ */
+export function getIo() {
+  return ioInstance;
+}
+
+/**
+ * Helper to emit an event to a specific user's personal room.
+ * @param {string} userId
+ * @param {string} event
+ * @param {any} payload
+ */
+export function emitToUser(userId, event, payload) {
+  if (!ioInstance || !userId) return;
+  ioInstance.to(`user:${userId.toString()}`).emit(event, payload);
+}
+
+/**
+ * Builds a deterministic conversationId from two user IDs.
+ * Sorting ensures user A→B and B→A always produce the same room name.
+ * @param {string} idA
+ * @param {string} idB
+ * @returns {string}
+ */
 export function buildConversationId(idA, idB) {
-  return [idA, idB].sort().join('_');
+  return [idA.toString(), idB.toString()].sort().join('_');
 }
 
 /**
@@ -42,7 +70,7 @@ async function hasConfirmedBooking(userIdA, userIdB) {
  * @param {string} conversationId
  * @returns {{ idA: string, idB: string } | null}
  */
-function parseConversationId(conversationId) {
+export function parseConversationId(conversationId) {
   if (typeof conversationId !== 'string') return null;
   const parts = conversationId.split('_');
   if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
@@ -53,16 +81,11 @@ function parseConversationId(conversationId) {
  * Attaches the Socket.io server to an existing HTTP server instance.
  * Handles auth, room joining, messaging, and contact info detection.
  *
- * Security posture:
- *   - Spoofing: JWT verified on every connection before socket is accepted
- *   - Elevation of Privilege: participant membership checked before every message
- *   - Repudiation: contact info flagged and persisted with timestamp (FR-8, NFR-9)
- *   - DoS: message length capped at 2000 chars; rate limiting via express-rate-limit on REST side
- *
- * @param {import('http').Server} httpServer
  * @param {import('socket.io').Server} io
  */
 export function initSocketServer(io) {
+  ioInstance = io;
+
   // ── Connection-level JWT auth (STRIDE: Spoofing) ──────────────────────────
   io.use(async (socket, next) => {
     try {
@@ -97,9 +120,10 @@ export function initSocketServer(io) {
   io.on('connection', (socket) => {
     const userId = socket.user._id.toString();
 
+    // Automatically join the user's personal room for direct notifications
+    socket.join(`user:${userId}`);
+
     // ── join_conversation ───────────────────────────────────────────────────
-    // Client sends: { conversationId: "idA_idB" }
-    // Server validates membership and joins the socket room
     socket.on('join_conversation', async ({ conversationId } = {}) => {
       const parsed = parseConversationId(conversationId);
       if (!parsed) {
@@ -117,9 +141,14 @@ export function initSocketServer(io) {
       socket.emit('joined_conversation', { conversationId });
     });
 
+    // ── leave_conversation ──────────────────────────────────────────────────
+    socket.on('leave_conversation', ({ conversationId } = {}) => {
+      if (conversationId) {
+        socket.leave(conversationId);
+      }
+    });
+
     // ── message:send ────────────────────────────────────────────────────────
-    // Client sends: { conversationId: "idA_idB", content: "Hello!" }
-    // Server validates, saves, detects contact info, and broadcasts
     socket.on('message:send', async ({ conversationId, content } = {}) => {
       try {
         // Input validation
@@ -155,7 +184,8 @@ export function initSocketServer(io) {
           conversationId,
           senderId: userId,
           content: content.trim(),
-          containsContactInfo: hasContactInfo
+          containsContactInfo: hasContactInfo,
+          isRead: false
         });
 
         const payload = {
@@ -164,33 +194,69 @@ export function initSocketServer(io) {
           senderId: message.senderId,
           content: message.content,
           containsContactInfo: message.containsContactInfo,
-          createdAt: message.createdAt
+          isRead: message.isRead,
+          createdAt: message.createdAt,
+          sender: {
+            _id: socket.user._id,
+            name: socket.user.name,
+            profilePicUrl: socket.user.profilePicUrl,
+            department: socket.user.department
+          }
         };
 
         // Broadcast to all sockets in the room (including sender for confirmation)
         io.to(conversationId).emit('message:receive', payload);
 
-        // FR-14: Trigger notification for message recipient
+        // Deliver live real-time notification badge event to recipient's personal room
+        io.to(`user:${otherId}`).emit('message:notify', payload);
+
+        // FR-14: Trigger persistent notification for message recipient
         const snippet = content.trim().length > 50 ? `${content.trim().substring(0, 47)}...` : content.trim();
-        await createNotification({
+        const notification = await createNotification({
           recipientId: otherId,
           senderId: userId,
           type: 'new_message',
-          title: 'New Message',
+          title: `New Message from ${socket.user.name}`,
           message: snippet,
           referenceId: message._id,
           referenceType: 'message'
         });
 
+        if (notification) {
+          io.to(`user:${otherId}`).emit('notification:new', notification);
+        }
       } catch (err) {
         console.error('[Socket] message:send error:', err.message);
         socket.emit('error', { code: 'SERVER_ERROR', message: 'Failed to send message.' });
       }
     });
 
+    // ── message:mark_read ───────────────────────────────────────────────────
+    socket.on('message:mark_read', async ({ conversationId } = {}) => {
+      try {
+        if (!conversationId) return;
+        const parsed = parseConversationId(conversationId);
+        if (!parsed) return;
+        const { idA, idB } = parsed;
+        if (userId !== idA && userId !== idB) return;
+
+        const otherId = userId === idA ? idB : idA;
+
+        await Message.updateMany(
+          { conversationId, senderId: otherId, isRead: false },
+          { $set: { isRead: true, readAt: new Date() } }
+        );
+
+        io.to(conversationId).emit('message:read_receipt', { conversationId, readerId: userId });
+        io.to(`user:${userId}`).emit('message:unread_updated');
+      } catch (err) {
+        console.error('[Socket] message:mark_read error:', err.message);
+      }
+    });
+
     // ── disconnect ──────────────────────────────────────────────────────────
     socket.on('disconnect', () => {
-      // Socket.io automatically removes the socket from all rooms on disconnect
+      // Socket.io automatically cleans up room memberships on disconnect
     });
   });
 }
