@@ -546,8 +546,8 @@ export async function generateGroundedAnswer(question, relevantChunks, options =
     };
   }
 
-  const apiKey = options.apiKey !== undefined ? options.apiKey : config.geminiApiKey;
-  const model = options.model || config.geminiChatModel || 'gemini-1.5-flash';
+  const apiKey = options.apiKey || config.geminiApiKey;
+  const model = options.model || config.geminiChatModel || 'gemini-3.6-flash';
   const fetchFn = options.fetchFn || globalThis.fetch;
   const allowMockFallback = options.allowMockFallback !== undefined ? options.allowMockFallback : true;
 
@@ -733,7 +733,7 @@ export async function generateGeneralAiAnswer(question, options = {}) {
   }
 
   const apiKey = options.apiKey || config.geminiApiKey;
-  const model = options.model || config.geminiChatModel || 'gemini-1.5-flash';
+  const model = options.model || config.geminiChatModel || 'gemini-3.6-flash';
   const fetchFn = options.fetchFn || globalThis.fetch;
 
   if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey === 'mock_key') {
@@ -805,7 +805,7 @@ Guidelines for your response formatting:
     const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     return {
-      grounded: true,
+      grounded: false,
       answer: candidateText?.trim() || "I couldn't formulate a response. Please try rephrasing your question.",
       sources: []
     };

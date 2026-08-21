@@ -33,10 +33,8 @@ export async function askQuestion(req, res, next) {
       throw new AppError('Question cannot exceed 5000 characters.', 400, 'QUESTION_TOO_LONG');
     }
 
-    let extractedDocumentText = '';
-    if (file && file.buffer) {
-      if (file.mimetype === 'application/pdf' || file.originalname?.toLowerCase().endsWith('.pdf')) {
-        const segments = extractTextFromPdfBuffer(file.buffer);
+    if (trimmedQuestion.length > 1000) {
+      throw new AppError('Question cannot exceed 1000 characters.', 400, 'QUESTION_TOO_LONG');
         extractedDocumentText = segments
           .map((s) => `[Page ${s.pageNumber}]:\n${s.text}`)
           .join('\n\n');

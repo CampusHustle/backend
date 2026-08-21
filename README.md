@@ -15,7 +15,7 @@
 | **Database** | MongoDB & Mongoose (v9) | Document store & embedded vector storage |
 | **Authentication** | JWT & bcryptjs | Access + Refresh token rotation, university domain validator |
 | **File Storage & OCR** | Cloudinary & Tesseract.js | PDF/image uploads, photo-to-PDF OCR conversion |
-| **AI Study Assistant** | Google Gemini API | 768-dim vector embeddings (`gemini-embedding-001`) & grounded Q&A (`gemini-2.5-flash`) |
+| **AI Study Assistant** | Google Gemini API | 768-dim vector embeddings (`gemini-embedding-001`) & grounded Q&A (`gemini-3.6-flash`) |
 | **Security & Auditing** | Express Rate Limit, Regex Sanitizers | STRIDE-aligned threat mitigations and abuse contact detection |
 | **Testing** | Node.js Test Runner (`node --test`) | 154 unit and integration tests with zero external test frameworks |
 
@@ -83,7 +83,7 @@ EMAIL_VERIFICATION_EXPIRES_IN=24h
 # Google Gemini API (RAG & AI Assistant)
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-GEMINI_CHAT_MODEL=gemini-2.5-flash
+GEMINI_CHAT_MODEL=gemini-3.6-flash
 
 # Cloudinary Storage (Optional for local dev, required for real file hosting)
 CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
