@@ -65,6 +65,21 @@ export async function updateProfile(userId, updateData) {
     updates.department = updateData.department.trim();
   }
 
+  // ── Gender ────────────────────────────────────────────────────────────────
+  if (updateData.gender !== undefined) {
+    if (updateData.gender === null || updateData.gender === '') {
+      updates.gender = null;
+    } else if (typeof updateData.gender === 'string') {
+      const normalizedGender = updateData.gender.trim().toLowerCase();
+      if (!['male', 'female'].includes(normalizedGender)) {
+        throw new AppError('Gender must be either male or female.', 400, 'VALIDATION_ERROR');
+      }
+      updates.gender = normalizedGender;
+    } else {
+      throw new AppError('Gender must be a string (male or female).', 400, 'VALIDATION_ERROR');
+    }
+  }
+
   // ── Year ──────────────────────────────────────────────────────────────────
   if (updateData.year !== undefined) {
     const yearMap = {

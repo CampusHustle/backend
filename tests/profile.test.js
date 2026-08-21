@@ -186,3 +186,35 @@ test('updateProfile - accepts valid skill tags and deduplicates (FR-3)', async (
     assert.notEqual(err.code, 'VALIDATION_ERROR');
   }
 });
+
+test('updateProfile - rejects invalid gender values', async () => {
+  await assert.rejects(
+    () => userService.updateProfile('507f1f77bcf86cd799439011', {
+      gender: 'other'
+    }),
+    (err) => {
+      assert.equal(err.code, 'VALIDATION_ERROR');
+      assert.ok(err.message.includes('Gender'));
+      return true;
+    }
+  );
+});
+
+test('updateProfile - accepts male and female gender', async () => {
+  try {
+    await userService.updateProfile('507f1f77bcf86cd799439011', {
+      gender: 'male'
+    });
+  } catch (err) {
+    assert.notEqual(err.code, 'VALIDATION_ERROR');
+  }
+
+  try {
+    await userService.updateProfile('507f1f77bcf86cd799439011', {
+      gender: 'female'
+    });
+  } catch (err) {
+    assert.notEqual(err.code, 'VALIDATION_ERROR');
+  }
+});
+
