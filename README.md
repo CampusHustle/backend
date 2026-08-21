@@ -124,6 +124,67 @@ npm run lint
 
 ---
 
+## 🐳 Docker Setup (Multi-Container)
+
+The entire backend runs as a multi-container stack defined in `docker-compose.yml` — no local Node.js or MongoDB installation required.
+
+### 1. Prerequisites
+- **Docker Engine** v24+ / **Docker Desktop** (includes the `docker compose` plugin)
+- A `.env` file in the project root (see [Environment Configuration](#3-environment-configuration)). Only `JWT_SECRET`, `JWT_REFRESH_SECRET`, and `GEMINI_API_KEY` are strictly required; everything else has sane defaults.
+
+### 2. Start the Full Stack
+```bash
+docker compose up --build -d
+```
+
+This builds the API image from the `Dockerfile` and starts both services:
+
+| Service | Image | Host Port | Description |
+|---|---|---|---|
+| `app` | Built from local `Dockerfile` (Node 20 Alpine) | `5000` | Express REST API + Socket.io gateway |
+| `mongo` | [`mongo:8`](https://hub.docker.com/_/mongo) | `27017` | MongoDB with persistent named volume (`mongo_data`) |
+
+Verify both containers are healthy:
+```bash
+docker compose ps
+curl http://localhost:5000/api/health
+```
+
+### 3. How Service Discovery Works
+
+Containers on the Compose network reach each other by **service name**, which acts as an internal DNS hostname:
+
+```yaml
+# docker-compose.yml → app service
+environment:
+  DATABASE_URL: mongodb://mongo:27017/campus_hustle
+```
+
+- `mongo` resolves to the database container's IP inside the `backend_default` network — no hardcoded container IPs.
+- This value **overrides** any `DATABASE_URL` set in `.env` (Compose `environment:` takes precedence over `env_file:`, and `dotenv` never overwrites existing process variables).
+- The `app` service waits for Mongo to pass its `mongosh ping` healthcheck (`depends_on: condition: service_healthy`), plus built-in connection retries in `config/db.js` eliminate startup race conditions.
+- On success, the app logs: `MongoDB Connected: mongo`.
+
+### 4. Common Commands
+
+```bash
+# Follow live logs from both services
+docker compose logs -f
+
+# Restart a single service after code changes (rebuilds image)
+docker compose up --build -d app
+
+# Stop the stack (data persists in the mongo_data volume)
+docker compose down
+
+# Stop the stack AND wipe all database data
+docker compose down -v
+```
+
+> **Note:** Port `27017` is exposed on the host for tools like MongoDB Compass (`mongodb://localhost:27017/campus_hustle`). Remove the `ports` entry under `mongo` in `docker-compose.yml` in shared/production environments to keep the database internal-only.
+
+---
+
 ## 📡 REST API Reference
 
 ### 🔐 Authentication (`/api/auth`)

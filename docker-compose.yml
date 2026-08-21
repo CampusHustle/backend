@@ -1,0 +1,49 @@
+# syntax=docker/compose:1
+
+services:
+  # ---------------------------------------------------------------------------
+  # Application (Express API + Socket.io)
+  # Built from ./Dockerfile
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: campushustle-api
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      # Connect to the database container using its SERVICE NAME as hostname.
+      # Docker Compose DNS resolves "mongo" to the database container inside
+      # the compose network. This overrides DATABASE_URL from .env.
+      DATABASE_URL: mongodb://mongo:27017/campus_hustle
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Database (MongoDB)
+  # Reachable from other services as hostname "mongo" on port 27017
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:8
+    container_name: campushustle-mongo
+    ports:
+      - "27017:27017" # host access for tools like Compass (optional)
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
