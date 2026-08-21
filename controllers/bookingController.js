@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Booking } from '../models/Booking.js';
 import { Availability } from '../models/Availability.js';
 import { AppError } from '../middleware/errorHandler.js';
@@ -14,9 +15,11 @@ export const createBooking = async (req, res, next) => {
     const studentId = req.user._id;
 
     let slot;
-    if (availabilityId) {
+    if (availabilityId && mongoose.Types.ObjectId.isValid(availabilityId)) {
       slot = await Availability.findById(availabilityId);
-    } else if (tutorId) {
+    }
+
+    if (!slot && tutorId) {
       const dayMap = {
         Mon: 'Monday',
         Tue: 'Tuesday',
@@ -72,7 +75,7 @@ export const createBooking = async (req, res, next) => {
     // Check if student already has a pending or confirmed booking for this slot
     const existingBooking = await Booking.findOne({
       studentId,
-      availabilityId,
+      availabilityId: slot._id,
       status: { $in: ['pending', 'confirmed'] },
     });
 
@@ -121,7 +124,7 @@ export const updateBookingStatus = async (req, res, next) => {
     const { status } = req.body;
     const userId = req.user._id;
 
-    const validStatuses = ['confirmed', 'declined', 'cancelled', 'completed'];
+    const validStatuses = ['pending', 'confirmed', 'declined', 'cancelled', 'completed'];
     if (!status || !validStatuses.includes(status)) {
       throw new AppError(
         `Invalid status transition value. Allowed statuses: ${validStatuses.join(', ')}.`,
@@ -164,6 +167,8 @@ export const updateBookingStatus = async (req, res, next) => {
         if (!isTutor) {
           throw new AppError('Forbidden. Only the tutor can decline a booking request.', 403, 'FORBIDDEN');
         }
+        // Free up availability slot on decline
+        await Availability.findByIdAndUpdate(booking.availabilityId, { isBooked: false });
       } else if (status === 'cancelled') {
         // Both student and tutor can cancel a pending booking
       } else if (status === 'completed') {
