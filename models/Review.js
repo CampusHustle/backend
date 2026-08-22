@@ -17,8 +17,7 @@ const reviewSchema = new mongoose.Schema(
     bookingId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Booking',
-      required: [true, 'Booking ID is required'],
-      index: true
+      required: [true, 'Booking ID is required']
     },
     // Three-axis rating (1–5 each) matching the User.rating schema (FR-12)
     rating: {
