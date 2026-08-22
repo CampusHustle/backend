@@ -31,6 +31,14 @@ export async function requireAuth(req, res, next) {
       throw new AppError('Account has been suspended.', 403, 'ACCOUNT_BLOCKED');
     }
 
+    if (!user.isEmailVerified) {
+      throw new AppError(
+        'Your university email is not verified. Please verify your email before accessing the platform.',
+        403,
+        'EMAIL_NOT_VERIFIED'
+      );
+    }
+
     req.user = user;
     next();
   } catch (error) {
