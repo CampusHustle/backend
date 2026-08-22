@@ -16,15 +16,15 @@ const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB hard limit before Cloudinary (per file)
+    fileSize: 25 * 1024 * 1024 // 25MB hard limit before Cloudinary
   }
 });
 
 /**
  * POST /notes
- * Upload a note file (PDF or image) with metadata.
+ * Upload a note file (PDF or image) with optional cover image and metadata.
  */
-router.post('/', writeActionRateLimiter, requireAuth, upload.single('file'), uploadNote);
+router.post('/', writeActionRateLimiter, requireAuth, upload.any(), uploadNote);
 
 /**
  * GET /notes/purchases/me

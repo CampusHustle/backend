@@ -133,18 +133,28 @@ export async function prepareUploadedNoteFile(file, ocrRunner = processOcrToPdf)
  */
 export async function uploadNote(req, res, next) {
   try {
-    // 1. Validate file presence
-    if (!req.file) {
+    // 1. Identify primary document file and optional cover image file from req.file or req.files
+    let docFile = req.file;
+    let coverFile = null;
+
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      docFile = req.files.find((f) => f.fieldname === 'file' || f.fieldname === 'document') || req.files[0];
+      coverFile = req.files.find((f) => f.fieldname === 'coverImage' || f.fieldname === 'cover' || f.fieldname === 'coverPage') || null;
+      if (coverFile && docFile === coverFile && req.files.length > 1) {
+        docFile = req.files.find((f) => f !== coverFile) || docFile;
+      }
+    }
+
+    if (!docFile) {
       throw new AppError(
-        'No file provided. Please upload a PDF or image file.',
+        'No document file provided. Please upload a PDF or image file.',
         400,
         'NO_FILE_PROVIDED'
       );
     }
 
-    const file = req.file;
-    const mimeType = file.mimetype;
-    const fileSize = file.size;
+    const mimeType = docFile.mimetype;
+    const fileSize = docFile.size;
 
     // 2. Validate MIME type
     if (!ALLOWED_MIME_TYPES[mimeType]) {
@@ -157,32 +167,44 @@ export async function uploadNote(req, res, next) {
     }
 
     // 3. Validate file size
-    const maxSize = MAX_FILE_SIZE[mimeType];
+    const maxSize = MAX_FILE_SIZE[mimeType] || 25 * 1024 * 1024;
     if (fileSize > maxSize) {
       const maxSizeMB = (maxSize / (1024 * 1024)).toFixed(2);
       const actualSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
       throw new AppError(
-        `File size (${actualSizeMB}MB) exceeds limit (${maxSizeMB}MB) for ${ALLOWED_MIME_TYPES[mimeType].extension.toUpperCase()} files.`,
+        `File size (${actualSizeMB}MB) exceeds limit (${maxSizeMB}MB) for ${ALLOWED_MIME_TYPES[mimeType]?.extension.toUpperCase() || 'document'} files.`,
         413,
         'FILE_SIZE_EXCEEDED'
       );
     }
 
-    const processedFile = await prepareUploadedNoteFile(file);
+    const processedFile = await prepareUploadedNoteFile(docFile);
     const processedMimeType = processedFile.mimetype;
 
     // Extract note metadata from request body
-    const { title, course, description, price, previewPages } = req.body || {};
+    const {
+      title,
+      course,
+      subject,
+      department,
+      description,
+      price,
+      previewPages,
+      contentType,
+      coverImageUrl: bodyCoverUrl,
+      coverImage: bodyCover
+    } = req.body || {};
 
-    if (!title || !course) {
+    const resolvedCourse = (course || subject || '').trim();
+    if (!title || !title.trim() || !resolvedCourse) {
       throw new AppError(
-        'Title and course are required fields.',
+        'Title and course/subject are required fields.',
         400,
         'MISSING_REQUIRED_FIELDS'
       );
     }
 
-    // Validate price if provided (Fail fast before Cloudinary upload)
+    // Validate price if provided
     let parsedPrice = 0;
     if (price !== undefined && price !== null && price !== '') {
       parsedPrice = parseFloat(price);
@@ -202,8 +224,7 @@ export async function uploadNote(req, res, next) {
       }
     }
 
-    // 4. Upload to Cloudinary
-    // Determine resource type based on the final processed file type
+    // 4. Upload to Cloudinary (Document file)
     const resourceType = processedMimeType === 'application/pdf' ? 'raw' : 'image';
 
     let cloudinaryUploadResult;
@@ -213,7 +234,7 @@ export async function uploadNote(req, res, next) {
           {
             resource_type: resourceType,
             folder: 'campushustle/notes',
-            public_id: `${req.user._id}_${Date.now()}_${processedFile.originalname
+            public_id: `${req.user._id}_${Date.now()}_${(processedFile.originalname || 'note')
               .replace(/\s+/g, '_')
               .split('.')
               .slice(0, -1)
@@ -241,21 +262,63 @@ export async function uploadNote(req, res, next) {
       );
     }
 
-    // 5. Save Note document to MongoDB
+    // 5. Upload Cover Image if provided
+    let finalCoverImageUrl = (bodyCoverUrl || bodyCover || '').trim();
+    if (coverFile && coverFile.buffer) {
+      try {
+        const coverUploadResult = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            {
+              resource_type: 'image',
+              folder: 'campushustle/covers',
+              public_id: `cover_${req.user._id}_${Date.now()}`,
+              overwrite: true,
+              quality: 'auto'
+            },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          uploadStream.end(coverFile.buffer);
+        });
+        if (coverUploadResult?.secure_url) {
+          finalCoverImageUrl = coverUploadResult.secure_url;
+        }
+      } catch (coverErr) {
+        console.error('[Cover Upload Error]', coverErr.message);
+      }
+    }
 
+    // If still no cover image and document was an image, use the document image
+    if (!finalCoverImageUrl && processedMimeType.startsWith('image/') && cloudinaryUploadResult?.secure_url) {
+      finalCoverImageUrl = cloudinaryUploadResult.secure_url;
+    }
+
+    // 6. Save Note document to MongoDB
     const note = new Note({
       tutorId: req.user._id,
       title: title.trim(),
-      course: course.trim(),
+      course: resolvedCourse,
+      department: (department || resolvedCourse).trim(),
       description: description ? description.trim() : '',
+      contentType: (contentType || 'PDF Notes').trim(),
       fileUrl: cloudinaryUploadResult.secure_url,
+      coverImageUrl: finalCoverImageUrl,
       price: parsedPrice,
-      previewPages: parseInt(previewPages) || 3
+      previewPages: parseInt(previewPages, 10) || 3
     });
 
     const savedNote = await note.save();
+    if (savedNote && typeof savedNote.populate === 'function') {
+      try {
+        await savedNote.populate('tutorId', 'name university department rating profilePicUrl');
+      } catch (popErr) {
+        // Non-fatal if populate fails
+      }
+    }
 
-    // 6. RAG Pipeline (FR-11): Extract text & generate chunk embeddings for AI Q&A
+    // 7. RAG Pipeline (FR-11): Extract text & generate chunk embeddings for AI Q&A
     try {
       let textSegments = [];
       if (processedFile.extractedText && processedFile.extractedText.trim()) {
@@ -266,7 +329,7 @@ export async function uploadNote(req, res, next) {
 
       // If no text could be extracted from PDF streams, fallback to metadata summary
       if (textSegments.length === 0) {
-        const fallbackText = `${title}. Course: ${course}. ${description || ''}`.trim();
+        const fallbackText = `${title}. Course: ${resolvedCourse}. ${description || ''}`.trim();
         textSegments = [{ text: fallbackText, pageNumber: 1 }];
       }
 
@@ -278,7 +341,7 @@ export async function uploadNote(req, res, next) {
       console.error('[RAG Extraction Error]', ragExtractErr.message);
     }
 
-    // 7. Return created Note
+    // 8. Return created Note
     res.status(201).json({
       success: true,
       message: 'Note uploaded successfully.',
