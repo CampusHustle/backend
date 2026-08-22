@@ -14,6 +14,9 @@ function getTransporter() {
       host: config.smtpHost,
       port: config.smtpPort,
       secure: config.smtpSecure,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
       auth: {
         user: config.smtpUser,
         pass: config.smtpPass,
@@ -23,6 +26,47 @@ function getTransporter() {
   }
 
   return null;
+}
+
+/**
+ * Sends an email using Brevo REST API over HTTPS (port 443).
+ * This completely avoids SMTP port 587 timeouts on cloud hosting providers like Render.
+ */
+async function sendViaBrevoApi({ to, subject, html, text }) {
+  let senderName = 'CampusHustle';
+  let senderEmail = 'da16gi@gmail.com';
+
+  if (config.emailFrom) {
+    const match = config.emailFrom.match(/^(?:(.*)<)?([^>]+)>?$/);
+    if (match) {
+      if (match[1]?.trim()) senderName = match[1].trim();
+      if (match[2]?.trim()) senderEmail = match[2].trim();
+    }
+  }
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': config.brevoApiKey,
+      'content-type': 'application/json',
+      'accept': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: senderName, email: senderEmail },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+      textContent: text,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || `Brevo HTTP error ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data;
 }
 
 /**
@@ -60,27 +104,41 @@ export async function sendVerificationEmail(to, token) {
 </body>
 </html>`;
 
+  const text = `Welcome to CampusHustle!\n\nVerify your university email here (expires in 24h):\n\n${verifyUrl}\n\nIf you did not create a CampusHustle account, you can safely ignore this email.`;
+  const subject = 'CampusHustle — Verify your university email';
+
+  // 1. Try Brevo REST API over HTTPS first (immune to Render SMTP port blocking)
+  if (config.brevoApiKey) {
+    try {
+      const data = await sendViaBrevoApi({ to, subject, html, text });
+      console.log(`[EmailService] ✅ Verification email sent via Brevo REST API to ${to} (id: ${data?.messageId})`);
+      return;
+    } catch (err) {
+      console.error(`[EmailService] Brevo REST API failed for ${to}:`, err.message);
+    }
+  }
+
+  // 2. Try Nodemailer SMTP as secondary
   const transporter = getTransporter();
-
-  if (!transporter) {
-    console.log('\n───── [EmailService] Verification Link (SMTP not configured) ─────');
-    console.log(`  To:   ${to}`);
-    console.log(`  Link: ${verifyUrl}`);
-    console.log('──────────────────────────────────────────────────────────────────\n');
-    return;
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: config.emailFrom,
+        to,
+        subject,
+        text,
+        html,
+      });
+      console.log(`[EmailService] ✅ Verification email sent via SMTP to ${to} (id: ${info?.messageId})`);
+      return;
+    } catch (err) {
+      console.error(`[EmailService] SMTP delivery failed to ${to}:`, err.message);
+    }
   }
 
-  try {
-    const info = await transporter.sendMail({
-      from: config.emailFrom,
-      to,
-      subject: 'CampusHustle — Verify your university email',
-      text: `Welcome to CampusHustle!\n\nVerify your university email here (expires in 24h):\n\n${verifyUrl}\n\nIf you did not create a CampusHustle account, you can safely ignore this email.`,
-      html,
-    });
-    console.log(`[EmailService] ✅ Verification email sent to ${to} (id: ${info?.messageId})`);
-  } catch (err) {
-    console.error(`[EmailService] Failed to send to ${to}:`, err.message);
-    console.log(`[EmailService] Fallback link: ${verifyUrl}`);
-  }
+  // 3. Fallback: Log link to console if neither worked or configured
+  console.log('\n───── [EmailService] Verification Link ─────');
+  console.log(`  To:   ${to}`);
+  console.log(`  Link: ${verifyUrl}`);
+  console.log('────────────────────────────────────────────\n');
 }

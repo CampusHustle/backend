@@ -31,11 +31,13 @@ export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001',
   geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash-lite',
-  // SMTP Email Delivery Configuration (Brevo)
+  // Brevo REST API Key (bypasses SMTP port restrictions on cloud hosts like Render)
+  brevoApiKey: process.env.BREVO_API_KEY || (process.env.SMTP_PASS?.startsWith('xkeysib-') ? process.env.SMTP_PASS : ''),
+  // SMTP Email Delivery Configuration (Brevo SMTP fallback)
   smtpHost: process.env.SMTP_HOST || '',
   smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
   smtpSecure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
-  emailFrom: process.env.EMAIL_FROM || 'CampusHustle <noreply@campushustle.et>',
+  emailFrom: process.env.EMAIL_FROM || 'CampusHustle <da16gi@gmail.com>',
 };
