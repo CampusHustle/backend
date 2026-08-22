@@ -73,7 +73,25 @@ export async function registerUser({ email, password, name, university, departme
   // Check existing account — after validation to avoid leaking email existence on invalid inputs
   const existingUser = await User.findOne({ email: normalizedEmail });
   if (existingUser) {
-    throw new AppError('An account with this email address already exists.', 409, 'EMAIL_EXISTS');
+    if (!existingUser.isEmailVerified) {
+      // User exists but has not verified email: issue new verification token and resend verification email
+      const verificationToken = generateVerificationToken(existingUser._id.toString(), existingUser.email);
+      existingUser.emailVerificationTokenHash = await bcrypt.hash(verificationToken, 10);
+      existingUser.emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await existingUser.save();
+
+      // Dispatch verification email in background without blocking response
+      sendVerificationEmail(existingUser.email, verificationToken).catch((err) => {
+        console.error('[EmailService Error]', err.message);
+      });
+
+      return {
+        user: existingUser,
+        message: 'Account already created. A new verification link has been sent to your university email.',
+        ...(config.nodeEnv !== 'production' && { verificationToken })
+      };
+    }
+    throw new AppError('An account with this email address already exists. Please log in.', 409, 'EMAIL_EXISTS');
   }
 
   // Hash password using bcrypt (NFR-1)
@@ -96,19 +114,16 @@ export async function registerUser({ email, password, name, university, departme
   newUser.emailVerificationTokenHash = await bcrypt.hash(verificationToken, 10);
   newUser.emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-  // Issue initial authentication token pair
-  const { accessToken, refreshToken } = generateTokens(newUser._id.toString(), newUser.role);
-  newUser.refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-
   await newUser.save();
 
-  // Send verification email (console log in dev, real SMTP in prod via emailService)
-  await sendVerificationEmail(newUser.email, verificationToken);
+  // Send verification email in background without blocking response
+  sendVerificationEmail(newUser.email, verificationToken).catch((err) => {
+    console.error('[EmailService Error]', err.message);
+  });
 
   return {
     user: newUser,
-    accessToken,
-    refreshToken,
+    message: 'Account created successfully. Please check your inbox to verify your email.',
     // verificationToken returned for dev convenience only
     ...(config.nodeEnv !== 'production' && { verificationToken })
   };
