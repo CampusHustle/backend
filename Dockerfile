@@ -32,7 +32,6 @@ COPY --chown=node:node routes ./routes
 COPY --chown=node:node services ./services
 COPY --chown=node:node socket ./socket
 COPY --chown=node:node utils ./utils
-COPY --chown=node:node eng.traineddata ./eng.traineddata
 
 USER node
 
