@@ -25,11 +25,13 @@ async function startServer() {
 
   httpServer.listen(config.port, () => {
     console.log(`CampusHustle API Server running on port ${config.port} (${config.nodeEnv})`);
-    // Email diagnostic — verifies SMTP is loaded correctly on Render
-    if (config.smtpHost && config.smtpUser && config.smtpPass) {
+    // Email diagnostic — verifies Brevo REST API / SMTP is loaded correctly on Render
+    if (config.brevoApiKey) {
+      console.log(`[EmailService] ✅ Brevo REST API configured (HTTPS) — from: ${config.emailFrom}`);
+    } else if (config.smtpHost && config.smtpUser && config.smtpPass) {
       console.log(`[EmailService] ✅ SMTP configured — host: ${config.smtpHost}, from: ${config.emailFrom}`);
     } else {
-      console.log(`[EmailService] ⚠️  SMTP not configured — emails will log to console. Set SMTP_HOST, SMTP_USER, SMTP_PASS in Render Environment.`);
+      console.log(`[EmailService] ⚠️  Email not configured — emails will log to console. Set BREVO_API_KEY or SMTP vars in Render Environment.`);
     }
   });
 }
