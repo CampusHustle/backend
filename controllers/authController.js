@@ -8,17 +8,18 @@ import { AppError } from '../middleware/errorHandler.js';
 export async function register(req, res, next) {
   try {
     const { email, password, name, university, department, year, role } = req.body;
+    const isAdminSignup = role === 'admin';
 
     if (
       typeof email !== 'string' ||
       typeof password !== 'string' ||
       typeof name !== 'string' ||
-      typeof university !== 'string'
+      (!isAdminSignup && typeof university !== 'string')
     ) {
       throw new AppError('Email, password, name, and university must be valid strings.', 400, 'VALIDATION_ERROR');
     }
 
-    if (!university.trim()) {
+    if (!isAdminSignup && !university.trim()) {
       throw new AppError('University name is required and cannot be blank.', 400, 'VALIDATION_ERROR');
     }
 

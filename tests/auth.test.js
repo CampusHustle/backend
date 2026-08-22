@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isUniversityEmail } from '../utils/emailValidator.js';
+import { isUniversityEmail, isValidEmail } from '../utils/emailValidator.js';
 import * as authService from '../services/authService.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
@@ -8,6 +8,13 @@ test('Email Validator - rejects non-university emails', () => {
   assert.equal(isUniversityEmail('student@gmail.com'), false);
   assert.equal(isUniversityEmail('attacker@yahoo.com'), false);
   assert.equal(isUniversityEmail('invalid'), false);
+});
+
+test('Email Validator - accepts normal email format for admin accounts', () => {
+  assert.equal(isValidEmail('admin@gmail.com'), true);
+  assert.equal(isValidEmail('ops@campushustle.com'), true);
+  assert.equal(isValidEmail('invalid'), false);
+  assert.equal(isValidEmail('missing-domain@'), false);
 });
 
 test('Email Validator - accepts valid .edu.et university emails', () => {

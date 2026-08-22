@@ -3,8 +3,10 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { isUniversityEmail } from '../utils/emailValidator.js';
+import { isUniversityEmail, isValidEmail } from '../utils/emailValidator.js';
 import { sendVerificationEmail } from './emailService.js';
+
+const MAX_ADMIN_USERS = 6;
 
 /**
  * Generates an access token and refresh token pair for a user.
@@ -43,16 +45,23 @@ function generateVerificationToken(userId, email) {
 }
 
 /**
- * Registers a new student or tutor account.
- * Generates email verification token and enforces university domain validation (FR-1, NFR-1).
+ * Registers a new account.
+ * Student/tutor accounts require university email. Admin accounts may use a normal email,
+ * but the platform is capped at MAX_ADMIN_USERS admin accounts.
  * @param {Object} userData
  */
 export async function registerUser({ email, password, name, university, department, year, role }) {
   const normalizedEmail = email.trim().toLowerCase();
   const trimmedName = typeof name === 'string' ? name.trim() : '';
+  const userRole = role && ['student', 'tutor', 'admin'].includes(role) ? role : 'student';
+  const isAdminSignup = userRole === 'admin';
 
-  // Validate university email domain requirement (FR-1)
-  if (!isUniversityEmail(normalizedEmail)) {
+  if (!isValidEmail(normalizedEmail)) {
+    throw new AppError('A valid email address is required.', 400, 'INVALID_EMAIL');
+  }
+
+  // Validate university email domain requirement for student/tutor accounts (FR-1)
+  if (!isAdminSignup && !isUniversityEmail(normalizedEmail)) {
     throw new AppError('Registration restricted strictly to valid university email addresses ending with .edu.et', 400, 'INVALID_UNIVERSITY_EMAIL');
   }
 
@@ -66,9 +75,6 @@ export async function registerUser({ email, password, name, university, departme
   if (isNaN(parsedYear) || parsedYear < 1 || parsedYear > 6) {
     throw new AppError('Year must be a number between 1 and 6.', 400, 'VALIDATION_ERROR');
   }
-
-  // Prevent admin role self-assignment at registration
-  const userRole = role && ['student', 'tutor'].includes(role) ? role : 'student';
 
   // Check existing account — after validation to avoid leaking email existence on invalid inputs
   const existingUser = await User.findOne({ email: normalizedEmail });
@@ -94,6 +100,13 @@ export async function registerUser({ email, password, name, university, departme
     throw new AppError('An account with this email address already exists. Please log in.', 409, 'EMAIL_EXISTS');
   }
 
+  if (isAdminSignup) {
+    const adminCount = await User.countDocuments({ role: 'admin' });
+    if (adminCount >= MAX_ADMIN_USERS) {
+      throw new AppError(`Admin account limit reached. A maximum of ${MAX_ADMIN_USERS} admins is allowed.`, 409, 'ADMIN_LIMIT_REACHED');
+    }
+  }
+
   // Hash password using bcrypt (NFR-1)
   const salt = await bcrypt.genSalt(10);
   const passwordHash = await bcrypt.hash(password, salt);
@@ -103,7 +116,7 @@ export async function registerUser({ email, password, name, university, departme
     email: normalizedEmail,
     passwordHash,
     role: userRole,
-    university: university.trim(),
+    university: isAdminSignup && !university?.trim() ? 'CampusHustle Admin' : university.trim(),
     department: department ? department.trim() : '',
     year: parsedYear,
     isEmailVerified: false // Requires email verification flow
@@ -130,19 +143,23 @@ export async function registerUser({ email, password, name, university, departme
 }
 
 /**
- * Authenticates a user with university credentials.
+ * Authenticates a user.
  * @param {Object} credentials
  */
 export async function loginUser({ email, password }) {
   const normalizedEmail = email.trim().toLowerCase();
 
-  if (!isUniversityEmail(normalizedEmail)) {
-    throw new AppError('Only valid university email addresses ending in .edu.et can log in.', 400, 'INVALID_UNIVERSITY_EMAIL');
+  if (!isValidEmail(normalizedEmail)) {
+    throw new AppError('A valid email address is required.', 400, 'INVALID_EMAIL');
   }
 
   const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash +refreshTokenHash');
   if (!user) {
     throw new AppError('Invalid credentials.', 401, 'INVALID_CREDENTIALS');
+  }
+
+  if (user.role !== 'admin' && !isUniversityEmail(normalizedEmail)) {
+    throw new AppError('Only admin accounts may log in with a non-university email.', 400, 'INVALID_UNIVERSITY_EMAIL');
   }
 
   if (user.isBlocked) {
@@ -223,15 +240,18 @@ export async function verifyUserEmail(token) {
 export async function resendVerificationEmail(email) {
   const normalizedEmail = email.trim().toLowerCase();
 
-  // Guard against non-university emails being used to probe the system (STRIDE: Spoofing)
-  if (!isUniversityEmail(normalizedEmail)) {
-    throw new AppError('Only valid university email addresses ending in .edu.et are accepted.', 400, 'INVALID_UNIVERSITY_EMAIL');
+  if (!isValidEmail(normalizedEmail)) {
+    throw new AppError('A valid email address is required.', 400, 'INVALID_EMAIL');
   }
 
   const user = await User.findOne({ email: normalizedEmail }).select('+emailVerificationTokenHash');
 
   if (!user) {
     throw new AppError('User account not found.', 404, 'USER_NOT_FOUND');
+  }
+
+  if (user.role !== 'admin' && !isUniversityEmail(normalizedEmail)) {
+    throw new AppError('Only admin accounts may use a non-university email.', 400, 'INVALID_UNIVERSITY_EMAIL');
   }
 
   if (user.isEmailVerified) {
