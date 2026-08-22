@@ -25,6 +25,15 @@ async function startServer() {
 
   httpServer.listen(config.port, () => {
     console.log(`CampusHustle API Server running on port ${config.port} (${config.nodeEnv})`);
+    // SMTP diagnostic — helps verify environment variables are loaded on Render
+    if (config.smtpHost && config.smtpUser && config.smtpPass) {
+      console.log(`[EmailService] ✅ SMTP configured — host: ${config.smtpHost}, user: ${config.smtpUser}, from: ${config.emailFrom}`);
+    } else {
+      console.log(`[EmailService] ⚠️  SMTP NOT configured (emails will log to console). Set SMTP_HOST, SMTP_USER, SMTP_PASS in Render Environment.`);
+      console.log(`  SMTP_HOST=${config.smtpHost || '(missing)'}`);
+      console.log(`  SMTP_USER=${config.smtpUser || '(missing)'}`);
+      console.log(`  SMTP_PASS=${config.smtpPass ? '(set)' : '(missing)'}`);
+    }
   });
 }
 
