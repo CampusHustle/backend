@@ -36,8 +36,8 @@ export async function askQuestion(req, res, next) {
     let extractedDocumentText = '';
     if (file && file.buffer) {
       if (file.mimetype === 'application/pdf' || file.originalname?.toLowerCase().endsWith('.pdf')) {
-        const segments = extractTextFromPdfBuffer(file.buffer);
-        extractedDocumentText = segments
+        const segments = await extractTextFromPdfBuffer(file.buffer);
+        extractedDocumentText = (Array.isArray(segments) ? segments : [])
           .map((s) => `[Page ${s.pageNumber}]:\n${s.text}`)
           .join('\n\n');
         
