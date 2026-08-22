@@ -12,6 +12,7 @@ router.get('/skills', userController.getSkillTags);
 router.get('/me', requireAuth, userController.getMe);
 router.put('/me', requireAuth, userController.updateMe);
 router.patch('/me/role', requireAuth, userController.updateUserRole);
+router.post('/me/delete-request', requireAuth, userController.requestAccountDeletion);
 
 // Public or authenticated tutor search with rate limiting (must precede /:id parameter route)
 router.get('/search', optionalAuth, generalApiRateLimiter, userController.searchTutors);
@@ -27,5 +28,4 @@ router.patch('/:id/status', requireAuth, requireRole('admin'), userController.ad
 router.get('/:id', userController.getUserById);
 
 export default router;
-
 

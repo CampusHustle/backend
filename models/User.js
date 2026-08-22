@@ -101,6 +101,29 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    banDetails: {
+      isBanned: { type: Boolean, default: false },
+      reason: { type: String, default: '', trim: true },
+      bannedAt: { type: Date, default: null },
+      bannedUntil: { type: Date, default: null },
+      bannedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+      }
+    },
+    deletionRequested: {
+      requested: { type: Boolean, default: false },
+      reason: { type: String, default: '', trim: true },
+      requestedAt: { type: Date, default: null },
+      reviewedAt: { type: Date, default: null },
+      reviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+      },
+      rejectionReason: { type: String, default: '', trim: true }
+    },
     blockedUsers: {
       type: [
         {
@@ -131,6 +154,8 @@ userSchema.index({ department: 1 });
 userSchema.index({ hourlyRate: 1 });
 userSchema.index({ 'rating.knowledge': -1 });
 userSchema.index({ role: 1, isBlocked: 1 });
+userSchema.index({ 'banDetails.isBanned': 1, 'banDetails.bannedUntil': 1 });
+userSchema.index({ 'deletionRequested.requested': 1, 'deletionRequested.requestedAt': -1 });
 
 // Strip security hashes when serializing to JSON
 userSchema.set('toJSON', {

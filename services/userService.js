@@ -406,10 +406,26 @@ export async function adminSetUserBlock(targetUserId, isBlocked) {
     throw new AppError('isBlocked must be a boolean.', 400, 'VALIDATION_ERROR');
   }
 
-  const update = { isBlocked };
-  if (isBlocked) {
-    update.refreshTokenHash = null; // Invalidate active sessions immediately
-  }
+  const update = isBlocked
+    ? {
+        isBlocked: true,
+        refreshTokenHash: null, // Invalidate active sessions immediately
+        banDetails: {
+          isBanned: true,
+          reason: 'Suspended by administrator',
+          bannedAt: new Date(),
+          bannedUntil: null,
+          bannedBy: null
+        }
+      }
+    : {
+        isBlocked: false,
+        'banDetails.isBanned': false,
+        'banDetails.reason': '',
+        'banDetails.bannedAt': null,
+        'banDetails.bannedUntil': null,
+        'banDetails.bannedBy': null
+      };
 
   const user = await User.findByIdAndUpdate(targetUserId, update, { new: true });
   if (!user) {
@@ -421,4 +437,3 @@ export async function adminSetUserBlock(targetUserId, isBlocked) {
     user
   };
 }
-

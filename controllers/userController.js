@@ -1,4 +1,5 @@
 import * as userService from '../services/userService.js';
+import * as adminService from '../services/adminService.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { ALLOWED_SKILL_TAGS } from '../utils/skillTags.js';
 import { Booking } from '../models/Booking.js';
@@ -34,6 +35,23 @@ export async function updateMe(req, res, next) {
 
     const updatedUser = await userService.updateProfile(req.user._id, req.body);
     res.status(200).json({ success: true, user: updatedUser });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/users/me/delete-request
+ * Authenticated user requests account deletion for admin review.
+ */
+export async function requestAccountDeletion(req, res, next) {
+  try {
+    const deletionRequested = await adminService.requestAccountDeletion(req.user._id, req.body?.reason);
+    res.status(200).json({
+      success: true,
+      message: 'Account deletion request submitted for administrator review.',
+      deletionRequested
+    });
   } catch (error) {
     next(error);
   }
@@ -184,4 +202,3 @@ export async function updateUserRole(req, res, next) {
     next(error);
   }
 }
-
