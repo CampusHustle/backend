@@ -31,11 +31,13 @@ export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001',
   geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash-lite',
-  // SMTP Email Delivery Configuration
+  // SMTP Email Delivery Configuration (legacy, kept for reference)
   smtpHost: process.env.SMTP_HOST || '',
   smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
   smtpSecure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
-  emailFrom: process.env.EMAIL_FROM || 'CampusHustle <noreply@campushustle.et>'
+  emailFrom: process.env.EMAIL_FROM || 'CampusHustle <onboarding@resend.dev>',
+  // Resend API key (replaces Nodemailer/SMTP)
+  resendApiKey: process.env.RESEND_API_KEY || '',
 };
