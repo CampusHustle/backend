@@ -139,6 +139,14 @@ export async function loginUser({ email, password }) {
     throw new AppError('Invalid credentials.', 401, 'INVALID_CREDENTIALS');
   }
 
+  if (!user.isEmailVerified) {
+    throw new AppError(
+      'Your university email is not verified yet. Please check your inbox for the verification link.',
+      403,
+      'EMAIL_NOT_VERIFIED'
+    );
+  }
+
   // Issue rotated token pair
   const { accessToken, refreshToken } = generateTokens(user._id.toString(), user.role);
   user.refreshTokenHash = await bcrypt.hash(refreshToken, 10);
