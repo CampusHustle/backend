@@ -225,23 +225,29 @@ export async function uploadNote(req, res, next) {
     }
 
     // 4. Upload to Cloudinary (Document file)
-    const resourceType = processedMimeType === 'application/pdf' ? 'raw' : 'image';
+    const isPdf = processedMimeType === 'application/pdf';
+    const resourceType = isPdf ? 'raw' : 'image';
+
+    const uploadOptions = {
+      resource_type: resourceType,
+      folder: 'campushustle/notes',
+      public_id: `${req.user._id}_${Date.now()}_${(processedFile.originalname || 'note')
+        .replace(/\s+/g, '_')
+        .split('.')
+        .slice(0, -1)
+        .join('.')
+        .replace(/[^a-zA-Z0-9_-]/g, '')}`,
+      overwrite: true
+    };
+    if (resourceType === 'image') {
+      uploadOptions.quality = 'auto';
+    }
 
     let cloudinaryUploadResult;
     try {
       cloudinaryUploadResult = await new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream(
-          {
-            resource_type: resourceType,
-            folder: 'campushustle/notes',
-            public_id: `${req.user._id}_${Date.now()}_${(processedFile.originalname || 'note')
-              .replace(/\s+/g, '_')
-              .split('.')
-              .slice(0, -1)
-              .join('.')}`,
-            overwrite: true,
-            quality: 'auto'
-          },
+          uploadOptions,
           (error, result) => {
             if (error) {
               reject(error);
