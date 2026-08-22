@@ -25,11 +25,11 @@ async function startServer() {
 
   httpServer.listen(config.port, () => {
     console.log(`CampusHustle API Server running on port ${config.port} (${config.nodeEnv})`);
-    // Email diagnostic — verifies RESEND_API_KEY is loaded on Render
-    if (config.resendApiKey) {
-      console.log(`[EmailService] ✅ Resend configured — from: ${config.emailFrom}`);
+    // Email diagnostic — verifies SMTP is loaded correctly on Render
+    if (config.smtpHost && config.smtpUser && config.smtpPass) {
+      console.log(`[EmailService] ✅ SMTP configured — host: ${config.smtpHost}, from: ${config.emailFrom}`);
     } else {
-      console.log(`[EmailService] ⚠️  RESEND_API_KEY not set — emails will log to console only. Add it in Render Environment.`);
+      console.log(`[EmailService] ⚠️  SMTP not configured — emails will log to console. Set SMTP_HOST, SMTP_USER, SMTP_PASS in Render Environment.`);
     }
   });
 }

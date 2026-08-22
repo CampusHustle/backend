@@ -1,23 +1,39 @@
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { config } from '../config/env.js';
 
-let resendClient = null;
+let cachedTransporter = null;
 
-function getResendClient() {
-  if (resendClient) return resendClient;
-  if (config.resendApiKey) {
-    resendClient = new Resend(config.resendApiKey);
+/**
+ * Creates or returns the cached Nodemailer SMTP transporter.
+ */
+function getTransporter() {
+  if (cachedTransporter) return cachedTransporter;
+
+  if (config.smtpHost && config.smtpUser && config.smtpPass) {
+    cachedTransporter = nodemailer.createTransport({
+      host: config.smtpHost,
+      port: config.smtpPort,
+      secure: config.smtpSecure,
+      auth: {
+        user: config.smtpUser,
+        pass: config.smtpPass,
+      },
+    });
+    return cachedTransporter;
   }
-  return resendClient;
+
+  return null;
 }
 
 /**
- * Sends a university email verification email via Resend.
+ * Sends a university email verification email.
  *
  * @param {string} to      - Recipient university email address
  * @param {string} token   - Signed verification token
  */
 export async function sendVerificationEmail(to, token) {
+  if (config.nodeEnv === 'test') return;
+
   const verifyUrl = `${config.clientUrl}/verify-email?token=${token}`;
 
   const html = `
@@ -34,7 +50,7 @@ export async function sendVerificationEmail(to, token) {
       <p style="margin:6px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">Verify your university email</p>
     </div>
     <div style="padding:32px 24px;text-align:center;">
-      <p style="color:#cbd5e1;font-size:15px;margin:0 0 24px;">You're almost there! Click the button below to verify your university email address. This link expires in <strong style="color:#fff;">24 hours</strong>.</p>
+      <p style="color:#cbd5e1;font-size:15px;margin:0 0 24px;">You're almost there! Click the button below to verify your university email. This link expires in <strong style="color:#fff;">24 hours</strong>.</p>
       <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:14px 32px;border-radius:10px;">Verify My Email</a>
       <p style="margin:24px 0 0;color:#64748b;font-size:11px;">Or paste this link into your browser:<br><a href="${verifyUrl}" style="color:#6366f1;word-break:break-all;">${verifyUrl}</a></p>
       <hr style="border:none;border-top:1px solid #334155;margin:24px 0;">
@@ -44,36 +60,27 @@ export async function sendVerificationEmail(to, token) {
 </body>
 </html>`;
 
-  const client = getResendClient();
+  const transporter = getTransporter();
 
-  if (!client) {
-    // Fallback: log to console (dev mode or missing key)
-    console.log('\n───── [EmailService] Verification Link (RESEND_API_KEY not set) ─────');
-    console.log(`  To: ${to}`);
+  if (!transporter) {
+    console.log('\n───── [EmailService] Verification Link (SMTP not configured) ─────');
+    console.log(`  To:   ${to}`);
     console.log(`  Link: ${verifyUrl}`);
-    console.log('─────────────────────────────────────────────────────────────────\n');
+    console.log('──────────────────────────────────────────────────────────────────\n');
     return;
   }
 
   try {
-    const { data, error } = await client.emails.send({
+    const info = await transporter.sendMail({
       from: config.emailFrom,
       to,
       subject: 'CampusHustle — Verify your university email',
-      html,
       text: `Welcome to CampusHustle!\n\nVerify your university email here (expires in 24h):\n\n${verifyUrl}\n\nIf you did not create a CampusHustle account, you can safely ignore this email.`,
+      html,
     });
-
-    if (error) {
-      console.error(`[EmailService] Resend error sending to ${to}:`, error.message);
-    } else {
-      console.log(`[EmailService] ✅ Verification email sent to ${to} (id: ${data?.id})`);
-    }
+    console.log(`[EmailService] ✅ Verification email sent to ${to} (id: ${info?.messageId})`);
   } catch (err) {
     console.error(`[EmailService] Failed to send to ${to}:`, err.message);
-    // Log link as fallback
     console.log(`[EmailService] Fallback link: ${verifyUrl}`);
   }
 }
-
-
