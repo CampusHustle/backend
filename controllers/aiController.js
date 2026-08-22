@@ -3,6 +3,8 @@ import { askTutorAssistant, generateGeneralAiAnswer } from '../services/ragServi
 import { extractTextFromPdfBuffer } from '../utils/pdfExtractor.js';
 import { AppError } from '../middleware/errorHandler.js';
 import Tesseract from 'tesseract.js';
+import { AiConversation } from '../models/AiConversation.js';
+import { AiMessage } from '../models/AiMessage.js';
 
 /**
  * Controller to handle AI Study Assistant queries (both tutor-scoped and general study questions,
@@ -18,7 +20,7 @@ import Tesseract from 'tesseract.js';
  */
 export async function askQuestion(req, res, next) {
   try {
-    const { tutorId, question } = req.body || {};
+    const { tutorId, question, conversationId } = req.body || {};
     const file = req.file;
 
     const rawQuestion = question || (file ? `Analyze this attached study document: ${file.originalname}` : '');
@@ -31,6 +33,17 @@ export async function askQuestion(req, res, next) {
 
     if (trimmedQuestion.length > 5000) {
       throw new AppError('Question cannot exceed 5000 characters.', 400, 'QUESTION_TOO_LONG');
+    }
+
+    let conversation = null;
+    if (conversationId) {
+      if (!Types.ObjectId.isValid(conversationId)) {
+        throw new AppError('Invalid AI conversation ID.', 400, 'INVALID_CONVERSATION_ID');
+      }
+      conversation = await AiConversation.findOne({ _id: conversationId, userId: req.user._id });
+      if (!conversation) {
+        throw new AppError('AI conversation not found.', 404, 'CONVERSATION_NOT_FOUND');
+      }
     }
 
     let extractedDocumentText = '';
@@ -80,8 +93,22 @@ export async function askQuestion(req, res, next) {
       });
     }
 
+    if (!conversation) {
+      const title = trimmedQuestion.slice(0, 200);
+      conversation = await AiConversation.create({ userId: req.user._id, title });
+    }
+
+    const [userMessage, assistantMessage] = await AiMessage.create([
+      { conversationId: conversation._id, role: 'user', content: trimmedQuestion },
+      { conversationId: conversation._id, role: 'assistant', content: result.answer }
+    ]);
+    conversation.updatedAt = assistantMessage.createdAt;
+    await conversation.save();
+
     res.status(200).json({
       success: true,
+      conversationId: conversation._id,
+      messages: [userMessage, assistantMessage],
       answer: result.answer,
       grounded: result.grounded !== undefined ? result.grounded : true,
       sources: result.sources || [],
