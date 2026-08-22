@@ -88,20 +88,25 @@ async function sendEmail({ to, subject, text, html }) {
 
   const transporter = getTransporter();
 
-  if (transporter) {
+  if (!transporter) {
+    console.log(
+      `[EmailService] SMTP not configured (HOST=${Boolean(config.smtpHost)}, USER=${Boolean(config.smtpUser)}, PASS=${Boolean(config.smtpPass)}). Using console fallback.`
+    );
+  } else {
     try {
-      await transporter.sendMail({
+      const info = await transporter.sendMail({
         from: config.emailFrom,
         to,
         subject,
         text,
         html: html || text,
       });
-      console.log(`[EmailService] Verification email successfully sent to ${to}`);
+      console.log(
+        `[EmailService] Verification email successfully sent to ${to} (ID: ${info?.messageId})`
+      );
       return;
     } catch (err) {
       console.error(`[EmailService] SMTP delivery failed to ${to}:`, err.message);
-      // Fall through to console log below so user is not completely blocked
     }
   }
 
