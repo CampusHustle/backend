@@ -30,5 +30,12 @@ export const config = {
   // Google Gemini API credentials & configuration for RAG embeddings and Q&A
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001',
-  geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash-lite'
+  geminiChatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash-lite',
+  // SMTP Email Delivery Configuration
+  smtpHost: process.env.SMTP_HOST || '',
+  smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
+  smtpSecure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
+  emailFrom: process.env.EMAIL_FROM || 'CampusHustle <noreply@campushustle.et>'
 };
