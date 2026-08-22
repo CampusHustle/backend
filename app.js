@@ -15,8 +15,31 @@ import notificationRoutes from './routes/notificationRoutes.js';
 
 export const app = express();
 
-// Global middleware
-app.use(cors({ origin: config.clientUrl, credentials: true }));
+// Trust reverse proxy headers on Render / cloud platforms (solves ERR_ERL_UNEXPECTED_X_FORWARDED_FOR)
+app.set('trust proxy', 1);
+
+// Global CORS configuration supporting Vercel and local origins
+const allowedOrigins = [
+  config.clientUrl,
+  'https://campushustl.vercel.app',
+  'https://campushustle.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000'
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || /\.vercel\.app$/.test(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, true);
+      }
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
