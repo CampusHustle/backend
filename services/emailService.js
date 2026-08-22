@@ -1,33 +1,18 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { config } from '../config/env.js';
 
-let cachedTransporter = null;
+let resendClient = null;
 
-/**
- * Creates or returns the cached Nodemailer SMTP transporter.
- */
-function getTransporter() {
-  if (cachedTransporter) return cachedTransporter;
-
-  if (config.smtpHost && config.smtpUser && config.smtpPass) {
-    cachedTransporter = nodemailer.createTransport({
-      host: config.smtpHost,
-      port: config.smtpPort,
-      secure: config.smtpSecure,
-      auth: {
-        user: config.smtpUser,
-        pass: config.smtpPass,
-      },
-    });
-    return cachedTransporter;
+function getResendClient() {
+  if (resendClient) return resendClient;
+  if (config.resendApiKey) {
+    resendClient = new Resend(config.resendApiKey);
   }
-
-  return null;
+  return resendClient;
 }
 
 /**
- * Sends a university email verification email.
- * Supports real SMTP via Nodemailer or dev console fallback.
+ * Sends a university email verification email via Resend.
  *
  * @param {string} to      - Recipient university email address
  * @param {string} token   - Signed verification token
@@ -40,80 +25,55 @@ export async function sendVerificationEmail(to, token) {
 <html>
 <head>
   <meta charset="utf-8">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0b1329; color: #f1f5f9; padding: 24px; }
-    .card { max-width: 540px; margin: 0 auto; background-color: #131d38; border: 1px solid #1e293b; border-radius: 16px; padding: 32px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); }
-    .brand { font-size: 22px; font-weight: 800; color: #10b981; margin-bottom: 20px; letter-spacing: -0.5px; }
-    .heading { font-size: 20px; font-weight: 700; color: #ffffff; margin-bottom: 12px; }
-    .text { font-size: 15px; line-height: 1.6; color: #94a3b8; margin-bottom: 24px; }
-    .btn { display: inline-block; background-color: #10b981; color: #ffffff !important; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 15px; margin-bottom: 24px; text-align: center; }
-    .footer { font-size: 12px; color: #64748b; border-top: 1px solid #1e293b; padding-top: 16px; margin-top: 20px; word-break: break-all; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body>
-  <div class="card">
-    <div class="brand">🎓 CampusHustle</div>
-    <div class="heading">Verify your university email address</div>
-    <p class="text">Welcome to CampusHustle! To activate your account and start discovering peer tutors, selling study materials, and accessing Felat AI, please verify your email address.</p>
-    <a href="${verifyUrl}" class="btn">Verify My University Email</a>
-    <p class="text" style="font-size: 13px; margin-bottom: 0;">This verification link will expire in 24 hours.</p>
-    <div class="footer">
-      If the button above does not work, copy and paste this link into your browser:<br>
-      <a href="${verifyUrl}" style="color: #38bdf8;">${verifyUrl}</a>
+<body style="margin:0;padding:0;background:#0f172a;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:480px;margin:40px auto;background:#1e293b;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+    <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 24px;text-align:center;">
+      <h1 style="margin:0;color:#fff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">CampusHustle</h1>
+      <p style="margin:6px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">Verify your university email</p>
+    </div>
+    <div style="padding:32px 24px;text-align:center;">
+      <p style="color:#cbd5e1;font-size:15px;margin:0 0 24px;">You're almost there! Click the button below to verify your university email address. This link expires in <strong style="color:#fff;">24 hours</strong>.</p>
+      <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:14px 32px;border-radius:10px;">Verify My Email</a>
+      <p style="margin:24px 0 0;color:#64748b;font-size:11px;">Or paste this link into your browser:<br><a href="${verifyUrl}" style="color:#6366f1;word-break:break-all;">${verifyUrl}</a></p>
+      <hr style="border:none;border-top:1px solid #334155;margin:24px 0;">
+      <p style="color:#475569;font-size:11px;margin:0;">If you didn't create a CampusHustle account, you can safely ignore this email.</p>
     </div>
   </div>
 </body>
-</html>
-  `;
+</html>`;
 
-  const emailPayload = {
-    to,
-    subject: 'CampusHustle — Verify your university email',
-    text: `Welcome to CampusHustle!\n\nClick the link below (or paste it into your browser) to verify your university email address.\nThis link expires in 24 hours.\n\n${verifyUrl}\n\nIf you did not create a CampusHustle account, you can safely ignore this email.`,
-    html,
-  };
+  const client = getResendClient();
 
-  await sendEmail(emailPayload);
-}
-
-/**
- * Sends an email using Nodemailer when configured, or logs to console as fallback.
- *
- * @param {{ to: string, subject: string, text: string, html?: string }} options
- */
-async function sendEmail({ to, subject, text, html }) {
-  if (config.nodeEnv === 'test') {
+  if (!client) {
+    // Fallback: log to console (dev mode or missing key)
+    console.log('\n───── [EmailService] Verification Link (RESEND_API_KEY not set) ─────');
+    console.log(`  To: ${to}`);
+    console.log(`  Link: ${verifyUrl}`);
+    console.log('─────────────────────────────────────────────────────────────────\n');
     return;
   }
 
-  const transporter = getTransporter();
+  try {
+    const { data, error } = await client.emails.send({
+      from: config.emailFrom,
+      to,
+      subject: 'CampusHustle — Verify your university email',
+      html,
+      text: `Welcome to CampusHustle!\n\nVerify your university email here (expires in 24h):\n\n${verifyUrl}\n\nIf you did not create a CampusHustle account, you can safely ignore this email.`,
+    });
 
-  if (!transporter) {
-    console.log(
-      `[EmailService] SMTP not configured (HOST=${Boolean(config.smtpHost)}, USER=${Boolean(config.smtpUser)}, PASS=${Boolean(config.smtpPass)}). Using console fallback.`
-    );
-  } else {
-    try {
-      const info = await transporter.sendMail({
-        from: config.emailFrom,
-        to,
-        subject,
-        text,
-        html: html || text,
-      });
-      console.log(
-        `[EmailService] Verification email successfully sent to ${to} (ID: ${info?.messageId})`
-      );
-      return;
-    } catch (err) {
-      console.error(`[EmailService] SMTP delivery failed to ${to}:`, err.message);
+    if (error) {
+      console.error(`[EmailService] Resend error sending to ${to}:`, error.message);
+    } else {
+      console.log(`[EmailService] ✅ Verification email sent to ${to} (id: ${data?.id})`);
     }
+  } catch (err) {
+    console.error(`[EmailService] Failed to send to ${to}:`, err.message);
+    // Log link as fallback
+    console.log(`[EmailService] Fallback link: ${verifyUrl}`);
   }
-
-  // Development / fallback logging
-  console.log('\n───── [EmailService] Verification Link ─────');
-  console.log(`  To:      ${to}`);
-  console.log(`  Subject: ${subject}`);
-  console.log(`  Body:\n${text}`);
-  console.log('────────────────────────────────────────────\n');
 }
+
+
